@@ -1,11 +1,11 @@
 """Scraper pour Auchan."""
 import re
 import logging
-from bs4 import BeautifulSoup
 from scrapers.base_scraper import BaseScraper
 from config import SEARCH_QUERIES
 
 logger = logging.getLogger(__name__)
+
 
 class AuchanScraper(BaseScraper):
     def __init__(self, browser):
@@ -21,78 +21,88 @@ class AuchanScraper(BaseScraper):
 
             produits = []
             articles = soup.select("article.product-thumbnail")
-            
+
             for article in articles:
                 try:
-                    titre_el = article.select_one("p.product-thumbnail__description")
-                    titre = titre_el.text.strip() if titre_el else "Inconnu"
-                    
+                    # URL
                     link_el = article.select_one("a.product-thumbnail__details-wrapper")
-                    url = link_el["href"] if link_el and "href" in link_el.attrs else ""
-                    if url and not url.startswith("http"):
-                        url = "https://www.auchan.fr" + url
+                    href = link_el.get("href", "") if link_el else ""
+                    if not href:
+                        continue
+                    url = "https://www.auchan.fr" + href if not href.startswith("http") else href
 
-                    prix_el = article.select_one("div.product-price")
-                    if prix_el:
-                        prix_texte = prix_el.text.strip()
-                        # Nettoyage pour garder uniquement les chiffres et la virgule/point
-                        prix = re.sub(r'[^\d,.]', '', prix_texte)
-                    else:
-                        prix = "N/A"
-                    old_price_el = article.select_one("del.product-price")
-                    old_price = old_price_el.text.strip() if old_price_el else ""
+                    # Titre — brand et nom sont dans le même <p>, séparateur espace
+                    titre_el = article.select_one("p.product-thumbnail__description")
+                    titre = titre_el.get_text(separator=" ", strip=True) if titre_el else "Inconnu"
+
+                    # Image via meta schema.org
+                    img_meta = article.select_one("meta[itemprop='image']")
+                    image_url = img_meta.get("content", "") if img_meta else ""
+
+                    # Prix via meta schema.org (content en float string, ex: "20.83")
+                    prix_meta = article.select_one("meta[itemprop='price']")
+                    prix = f"{prix_meta.get('content', 'N/A')}€" if prix_meta else "N/A"
+
+                    # Ancien prix (barré)
+                    old_price_el = article.select_one("del.product-price--old")
+                    old_price = old_price_el.get_text(strip=True) if old_price_el else ""
+
+                    # Réduction
                     discount_el = article.select_one(".product-discount-old-price__sticker")
-                    discount = discount_el.text.strip() if discount_el else ""
+                    discount = discount_el.get_text(strip=True) if discount_el else ""
 
-                    img_el = article.select_one("img")
-                    image_url = ""
-                    if img_el:
-                        image_url = img_el.get("src") or img_el.get("data-src") or ""
+                    # Stock — source 1 : classe outOfStock sur l'article
+                    out_of_stock_class = "outOfStock" in article.get("class", [])
 
-                    availability_el = article.select_one('meta[itemprop="availability"]')
-                    stock_el = article.select_one(".quantity-selector[data-stock]")
-                    indispo = "outOfStock" in article.get("class", [])
+                    # Stock — source 2 : meta schema.org availability
+                    avail_meta = article.select_one("meta[itemprop='availability']")
+                    avail_content = avail_meta.get("content", "").lower() if avail_meta else ""
+
+                    # Stock — source 3 : data-stock (prend le max si plusieurs offres)
                     stock_quantity = None
+                    stock_els = article.select("[data-stock]")
+                    if stock_els:
+                        vals = []
+                        for s in stock_els:
+                            try:
+                                vals.append(int(s.get("data-stock", "0")))
+                            except ValueError:
+                                pass
+                        if vals:
+                            stock_quantity = max(vals)
 
-                    en_stock = False
-                    if availability_el:
-                        en_stock = "instock" in availability_el.get("content", "").lower()
-                    elif stock_el:
-                        try:
-                            stock_quantity = int(stock_el.get("data-stock", "0"))
-                            en_stock = stock_quantity > 0
-                        except ValueError:
-                            en_stock = False
-                    en_stock = en_stock and not indispo
-                    if stock_quantity is None and stock_el:
-                        try:
-                            stock_quantity = int(stock_el.get("data-stock", "0"))
-                        except ValueError:
-                            stock_quantity = None
+                    if out_of_stock_class:
+                        en_stock = False
+                    elif avail_content:
+                        en_stock = "instock" in avail_content
+                    elif stock_quantity is not None:
+                        en_stock = stock_quantity > 0
+                    else:
+                        en_stock = True
 
+                    # Références
                     reference = article.get("data-id", "")
-                    offer_el = article.select_one("[data-offer-id]")
-                    detailed_reference = offer_el.get("data-offer-id", "") if offer_el else reference
+                    footer_el = article.select_one("footer[data-offer-id]")
+                    detailed_reference = footer_el.get("data-offer-id", reference) if footer_el else reference
 
-                    if url:
-                        produits.append({
-                            "url": url,
-                            "titre": titre,
-                            "prix": prix,
-                            "old_price": old_price,
-                            "discount": discount,
-                            "image_url": image_url,
-                            "en_stock": en_stock,
-                            "stock_quantity": stock_quantity,
-                            "reference": reference,
-                            "detailed_reference": detailed_reference,
-                            "country": "FR",
-                            "direct_links": {"Auchan": url},
-                        })
+                    produits.append({
+                        "url": url,
+                        "titre": titre,
+                        "prix": prix,
+                        "old_price": old_price,
+                        "discount": discount,
+                        "image_url": image_url,
+                        "en_stock": en_stock,
+                        "stock_quantity": stock_quantity,
+                        "reference": reference,
+                        "detailed_reference": detailed_reference,
+                        "country": "FR",
+                        "direct_links": {"Auchan": url},
+                    })
                 except Exception as e:
                     logger.warning(f"[{self.enseigne}] Erreur parsing d'un article: {e}")
 
-            if len(produits) == 0:
+            if not produits:
                 await debug_dump(page, self.enseigne)
 
             logger.info(f"[{self.enseigne}] {len(produits)} produits trouvés.")
