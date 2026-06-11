@@ -3,6 +3,8 @@ from playwright.async_api import Browser, Page
 from bs4 import BeautifulSoup
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
+from urllib.parse import quote_plus
+import asyncio
 import logging
 import config
 
@@ -29,14 +31,69 @@ class BaseScraper(ABC):
     # Chaque scraper peut le surcharger pour s'assurer que le contenu JS est chargé.
     wait_selector: str | None = None
 
+    # Délai d'attente du wait_selector sur les pages de recherche.
+    search_selector_timeout: int = 15000
+
     def __init__(self, enseigne: str, browser: Browser):
         self.enseigne = enseigne
         self.browser = browser
         self._last_status: str = "ok"
 
     @abstractmethod
+    def parse_page(self, soup: BeautifulSoup) -> list[dict]:
+        """Extrait la liste des produits d'UNE page de résultats de recherche."""
+        ...
+
+    def search_urls(self) -> list[str]:
+        """Construit une URL de recherche par mot-clé pour cette enseigne."""
+        template = config.SEARCH_URL_TEMPLATES.get(self.enseigne)
+        if not template:
+            return [getattr(self, "url_recherche", "")]
+        return [template.format(q=quote_plus(kw)) for kw in config.SEARCH_KEYWORDS]
+
     async def scraper_recherche(self) -> list[dict]:
-        pass
+        """
+        Recherche tous les mots-clés en parallèle, agrège et déduplique par URL.
+        Met à jour self._last_status (ok si au moins une page a répondu).
+        """
+        logger.info("[%s] Recherche %d mots-clés...", self.enseigne, len(config.SEARCH_KEYWORDS))
+        urls = [u for u in self.search_urls() if u]
+        sem = asyncio.Semaphore(config.SEARCH_CONCURRENCY)
+
+        async def fetch(url):
+            async with sem:
+                return await self._fetch_soup(
+                    url, wait_until="networkidle",
+                    wait_selector=self.wait_selector,
+                    selector_timeout=self.search_selector_timeout,
+                )
+
+        resultats = await asyncio.gather(*(fetch(u) for u in urls))
+
+        produits, vus, statuts = [], set(), []
+        for soup, statut in resultats:
+            statuts.append(statut)
+            if not soup:
+                continue
+            try:
+                for prod in self.parse_page(soup):
+                    url = prod.get("url", "")
+                    if url and url not in vus:
+                        vus.add(url)
+                        produits.append(prod)
+            except Exception as e:
+                logger.warning("[%s] Erreur parse_page: %s", self.enseigne, e)
+
+        if "ok" in statuts:
+            self._last_status = "ok"
+        elif "blocked" in statuts:
+            self._last_status = "blocked"
+        else:
+            self._last_status = "timeout"
+
+        logger.info("[%s] %d produits uniques (%d requêtes, statut: %s).",
+                    self.enseigne, len(produits), len(urls), self._last_status)
+        return produits
 
     async def _fetch_soup(self, url: str, *, wait_until: str = "domcontentloaded",
                           wait_selector: str | None = None, selector_timeout: int = 8000):

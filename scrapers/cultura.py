@@ -16,63 +16,52 @@ class CulturaScraper(BaseScraper):
             "Cultura", "https://www.cultura.com/recherche.html?q=cartes+pokemon"
         )
 
-    async def scraper_recherche(self) -> list[dict]:
-        logger.info("[%s] Début du scraping...", self.enseigne)
-        from debug_utils import debug_dump
+    def parse_page(self, soup) -> list[dict]:
+        produits = []
+        articles = soup.select(".product-miniature, article.product-miniature")
 
-        async with self.get_page_soup(self.url_recherche) as (page, soup):
-            if not soup:
-                return []
+        for article in articles:
+            try:
+                titre_el = article.select_one(
+                    ".product-title a, h3 a, .product-description a"
+                )
+                titre = titre_el.get_text(strip=True) if titre_el else "Inconnu"
 
-            produits = []
-            articles = soup.select(".product-miniature, article.product-miniature")
+                url = titre_el.get("href", "") if titre_el else ""
+                if url and not url.startswith("http"):
+                    url = "https://www.cultura.com" + url
 
-            for article in articles:
-                try:
-                    titre_el = article.select_one(
-                        ".product-title a, h3 a, .product-description a"
-                    )
-                    titre = titre_el.get_text(strip=True) if titre_el else "Inconnu"
+                if not url:
+                    continue
 
-                    url = titre_el.get("href", "") if titre_el else ""
-                    if url and not url.startswith("http"):
-                        url = "https://www.cultura.com" + url
+                prix_el = article.select_one(
+                    ".price, .product-price, span[itemprop='price']"
+                )
+                prix = prix_el.get_text(strip=True) if prix_el else "N/A"
 
-                    if not url:
-                        continue
+                img_el = article.select_one("img[src], img[data-src]")
+                image_url = ""
+                if img_el:
+                    image_url = img_el.get("src") or img_el.get("data-src") or ""
 
-                    prix_el = article.select_one(
-                        ".price, .product-price, span[itemprop='price']"
-                    )
-                    prix = prix_el.get_text(strip=True) if prix_el else "N/A"
+                indispo = article.select_one(
+                    ".out-of-stock, .product-unavailable, [class*=out-of-stock]"
+                )
+                btn_panier = article.select_one(
+                    "button.add-to-cart, .ajax_add_to_cart_button, [data-button-action='add-to-cart']"
+                )
+                en_stock = bool(btn_panier and not indispo)
 
-                    img_el = article.select_one("img[src], img[data-src]")
-                    image_url = ""
-                    if img_el:
-                        image_url = img_el.get("src") or img_el.get("data-src") or ""
+                produits.append({
+                    "url": url,
+                    "titre": titre,
+                    "prix": prix,
+                    "image_url": image_url,
+                    "en_stock": en_stock,
+                    "country": "FR",
+                    "direct_links": {"Cultura": url},
+                })
+            except Exception as e:
+                logger.warning("[%s] Erreur parsing article: %s", self.enseigne, e)
 
-                    indispo = article.select_one(
-                        ".out-of-stock, .product-unavailable, [class*=out-of-stock]"
-                    )
-                    btn_panier = article.select_one(
-                        "button.add-to-cart, .ajax_add_to_cart_button, [data-button-action='add-to-cart']"
-                    )
-                    en_stock = bool(btn_panier and not indispo)
-
-                    produits.append({
-                        "url": url,
-                        "titre": titre,
-                        "prix": prix,
-                        "image_url": image_url,
-                        "en_stock": en_stock,
-                        "country": "FR",
-                        "direct_links": {"Cultura": url},
-                    })
-                except Exception as e:
-                    logger.warning("[%s] Erreur parsing article: %s", self.enseigne, e)
-
-            if not produits:
-                await debug_dump(page, self.enseigne)
-
-            logger.info("[%s] %d produits trouvés.", self.enseigne, len(produits))
-            return produits
+        return produits

@@ -16,66 +16,55 @@ class GrandeRecreScraper(BaseScraper):
             "GrandeRecre", "https://www.lagranderecre.fr/recherche?q=cartes+pokemon"
         )
 
-    async def scraper_recherche(self) -> list[dict]:
-        logger.info("[%s] Début du scraping...", self.enseigne)
-        from debug_utils import debug_dump
+    def parse_page(self, soup) -> list[dict]:
+        produits = []
+        articles = soup.select(
+            ".c-product-tile, .product-tile, .product-miniature, [class*=product-tile]"
+        )
 
-        async with self.get_page_soup(self.url_recherche) as (page, soup):
-            if not soup:
-                return []
+        for article in articles:
+            try:
+                titre_el = article.select_one(
+                    ".c-product-tile__title, .product-title, .product-name, h3 a, h2 a"
+                )
+                titre = titre_el.get_text(strip=True) if titre_el else "Inconnu"
 
-            produits = []
-            articles = soup.select(
-                ".c-product-tile, .product-tile, .product-miniature, [class*=product-tile]"
-            )
+                link_el = article.select_one("a[href]")
+                url = link_el.get("href", "") if link_el else ""
+                if url and not url.startswith("http"):
+                    url = "https://www.lagranderecre.fr" + url
 
-            for article in articles:
-                try:
-                    titre_el = article.select_one(
-                        ".c-product-tile__title, .product-title, .product-name, h3 a, h2 a"
-                    )
-                    titre = titre_el.get_text(strip=True) if titre_el else "Inconnu"
+                if not url:
+                    continue
 
-                    link_el = article.select_one("a[href]")
-                    url = link_el.get("href", "") if link_el else ""
-                    if url and not url.startswith("http"):
-                        url = "https://www.lagranderecre.fr" + url
+                prix_el = article.select_one(
+                    ".c-price__amount, .price, .product-price, [class*=price]"
+                )
+                prix = prix_el.get_text(strip=True) if prix_el else "N/A"
 
-                    if not url:
-                        continue
+                img_el = article.select_one("img[src], img[data-src]")
+                image_url = ""
+                if img_el:
+                    image_url = img_el.get("src") or img_el.get("data-src") or ""
 
-                    prix_el = article.select_one(
-                        ".c-price__amount, .price, .product-price, [class*=price]"
-                    )
-                    prix = prix_el.get_text(strip=True) if prix_el else "N/A"
+                indispo = article.select_one(
+                    ".out-of-stock, .indisponible, [class*=unavailable], [class*=out-of-stock]"
+                )
+                btn_panier = article.select_one(
+                    "button.add-to-cart, button[class*=add-to-cart], [class*=btn-cart]"
+                )
+                en_stock = bool(btn_panier and not indispo)
 
-                    img_el = article.select_one("img[src], img[data-src]")
-                    image_url = ""
-                    if img_el:
-                        image_url = img_el.get("src") or img_el.get("data-src") or ""
+                produits.append({
+                    "url": url,
+                    "titre": titre,
+                    "prix": prix,
+                    "image_url": image_url,
+                    "en_stock": en_stock,
+                    "country": "FR",
+                    "direct_links": {"La Grande Récré": url},
+                })
+            except Exception as e:
+                logger.warning("[%s] Erreur parsing article: %s", self.enseigne, e)
 
-                    indispo = article.select_one(
-                        ".out-of-stock, .indisponible, [class*=unavailable], [class*=out-of-stock]"
-                    )
-                    btn_panier = article.select_one(
-                        "button.add-to-cart, button[class*=add-to-cart], [class*=btn-cart]"
-                    )
-                    en_stock = bool(btn_panier and not indispo)
-
-                    produits.append({
-                        "url": url,
-                        "titre": titre,
-                        "prix": prix,
-                        "image_url": image_url,
-                        "en_stock": en_stock,
-                        "country": "FR",
-                        "direct_links": {"La Grande Récré": url},
-                    })
-                except Exception as e:
-                    logger.warning("[%s] Erreur parsing article: %s", self.enseigne, e)
-
-            if not produits:
-                await debug_dump(page, self.enseigne)
-
-            logger.info("[%s] %d produits trouvés.", self.enseigne, len(produits))
-            return produits
+        return produits

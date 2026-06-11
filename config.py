@@ -28,12 +28,37 @@ ENABLE_PRICE_CHART = os.getenv("ENABLE_PRICE_CHART", "true").lower() in {"1", "t
 # Défaut 6h: empêche un produit qui "clignote" de flooder le salon Discord.
 ALERT_COOLDOWN = int(os.getenv("ALERT_COOLDOWN", "21600"))
 
-# Mots-clés de recherche globaux par enseigne (Option A validée)
+# Mots-clés recherchés sur CHAQUE enseigne (découverte de produits variés).
+# Surchargeable via .env : SEARCH_KEYWORDS="cartes pokemon,coffret pokemon,..."
+# Ajoute ici les noms de sets récents pour suivre les dernières sorties
+# (ex: "pokemon evolutions prismatiques", "pokemon flammes blanches").
+_DEFAULT_KEYWORDS = [
+    "cartes pokemon",
+    "coffret pokemon",
+    "elite trainer box pokemon",
+    "booster pokemon",
+    "display pokemon",
+    "bundle pokemon",
+    "tin pokemon",
+]
+_env_keywords = [k.strip() for k in os.getenv("SEARCH_KEYWORDS", "").split(",") if k.strip()]
+SEARCH_KEYWORDS = _env_keywords or _DEFAULT_KEYWORDS
+
+# Nombre de mots-clés recherchés en parallèle par enseigne.
+SEARCH_CONCURRENCY = int(os.getenv("SEARCH_CONCURRENCY", "3"))
+
+# Gabarit d'URL de recherche par enseigne. {q} est remplacé par le mot-clé encodé.
+SEARCH_URL_TEMPLATES = {
+    "Cultura": "https://www.cultura.com/recherche.html?q={q}",
+    "Leclerc": "https://www.e.leclerc/recherche?q={q}",
+    "KingJouet": "https://www.king-jouet.com/recherche.htm?mot={q}",
+    "Smyths": "https://www.smythstoys.com/fr/fr-fr/recherche/?text={q}",
+    "GrandeRecre": "https://www.lagranderecre.fr/recherche?q={q}",
+    "Auchan": "https://www.auchan.fr/recherche?text={q}",
+}
+
+# Conservé pour compatibilité : URL de recherche par défaut (1 mot-clé) par enseigne.
 SEARCH_QUERIES = {
-    "Cultura": "https://www.cultura.com/recherche.html?q=cartes+pokemon",
-    "Leclerc": "https://www.e.leclerc/recherche?q=cartes+pokemon",
-    "KingJouet": "https://www.king-jouet.com/recherche.htm?mot=cartes+pokemon",
-    "Smyths": "https://www.smythstoys.com/fr/fr-fr/recherche/?text=cartes+pokemon",
-    "GrandeRecre": "https://www.lagranderecre.fr/recherche?q=cartes+pokemon",
-    "Auchan": "https://www.auchan.fr/recherche?text=cartes+pokemon"
+    enseigne: tmpl.format(q="cartes+pokemon")
+    for enseigne, tmpl in SEARCH_URL_TEMPLATES.items()
 }
