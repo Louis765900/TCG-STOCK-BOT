@@ -58,12 +58,22 @@ MOTS_TCG = [
     "deck", "pokemon", "pokémon",
 ]
 
+# Liste blanche : produits explicitement voulus qui contiennent un mot normalement
+# exclu (ex: "sticker"). Une correspondance ici force la validation.
+MOTS_PRIORITAIRES = [
+    "sticker day",
+]
+
 
 def est_tcg_valide_local(titre: str) -> bool:
     """Filtre local deterministe: rapide, stable, sans quota externe."""
     titre_lower = titre.lower().strip()
     if not titre_lower:
         return False
+
+    # La liste blanche prime sur les exclusions.
+    if any(mot in titre_lower for mot in MOTS_PRIORITAIRES):
+        return True
 
     if any(mot in titre_lower for mot in MOTS_EXCLUS):
         logger.debug("Rejete par filtre local (mot exclu): %s", titre)
