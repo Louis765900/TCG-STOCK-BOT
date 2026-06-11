@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import random
+import time
 from playwright.async_api import async_playwright
 
 import config
@@ -37,14 +38,32 @@ async def _enregistrer_prix(url: str, prix_str: str, en_stock: bool):
 
 
 async def _alerter(prod: dict, enseigne: str, type_alerte: str):
-    """Envoie une alerte Discord avec le graphique d'historique si disponible."""
+    """
+    Envoie une alerte Discord (avec graphique si dispo), sauf si le produit a
+    déjà été alerté il y a moins de ALERT_COOLDOWN secondes (anti-spam).
+    """
+    url = prod.get("url", "")
+    now = time.time()
+
+    row = await database.recuperer_produit(url)
+    if row is not None:
+        derniere = row["derniere_alerte"] or 0
+        if now - derniere < config.ALERT_COOLDOWN:
+            restant = int((config.ALERT_COOLDOWN - (now - derniere)) / 60)
+            logger.info(
+                "Alerte ignorée (cooldown ~%dmin restantes) [%s]: %s",
+                restant, enseigne, prod.get("titre", ""),
+            )
+            return
+
     chart = None
     if config.ENABLE_PRICE_CHART:
-        historique = await database.recuperer_historique_prix(prod.get("url", ""))
+        historique = await database.recuperer_historique_prix(url)
         chart = generer_graphique_prix(
             historique, prod.get("titre", ""), STORE_COLORS.get(enseigne, 0xE30613)
         )
     await envoyer_alerte(prod, enseigne, type_alerte, chart_png=chart)
+    await database.enregistrer_alerte(url, now)
 
 
 # ----------------------------------------------------------------------------
@@ -80,6 +99,7 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int) -> CycleReport:
                         etat_db = await database.recuperer_produit(url)
 
                         if not etat_db:
+                            # Découverte d'un nouveau produit.
                             logger.info("NOUVEAUTE [%s]: %s", enseigne, titre)
                             await database.ajouter_produit(
                                 url, titre, enseigne, en_stock,
@@ -90,21 +110,15 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int) -> CycleReport:
                             if en_stock:
                                 await _alerter(prod, enseigne, "NOUVEAUTE")
                         else:
-                            ancien_stock = bool(etat_db["en_stock"])
+                            # Produit déjà connu : la recherche ne fait QUE rafraîchir
+                            # prix/image. Le stock (restock/rupture) est géré par la
+                            # watchlist qui lit la fiche produit, source fiable. Évite
+                            # le clignotement dû aux tuiles de recherche imprécises.
                             if prod.get("image_url"):
                                 await database.mettre_a_jour_image(url, prod["image_url"])
-
-                            if en_stock and not ancien_stock:
-                                logger.info("RESTOCK [%s]: %s", enseigne, titre)
-                                await database.mettre_a_jour_stock(url, True, prod.get("prix"))
-                                await _alerter(prod, enseigne, "RESTOCK")
-                                store.restocks += 1
-                            elif not en_stock and ancien_stock:
-                                logger.info("RUPTURE [%s]: %s", enseigne, titre)
-                                await database.mettre_a_jour_stock(url, False, prod.get("prix"))
-                                store.ruptures += 1
-                            else:
-                                await database.mettre_a_jour_stock(url, en_stock, prod.get("prix"))
+                            await database.mettre_a_jour_stock(
+                                url, bool(etat_db["en_stock"]), prod.get("prix")
+                            )
 
                     except Exception as inner_e:
                         logger.error("[%s] Erreur produit: %s", enseigne, inner_e)

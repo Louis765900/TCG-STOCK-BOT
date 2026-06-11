@@ -18,6 +18,7 @@ async def initialiser_db():
                 en_stock INTEGER NOT NULL,
                 prix TEXT DEFAULT 'N/A',
                 image_url TEXT DEFAULT '',
+                derniere_alerte REAL DEFAULT 0,
                 dernier_vu REAL NOT NULL,
                 date_decouverte REAL NOT NULL
             )
@@ -63,6 +64,9 @@ async def _migrer_colonnes(db):
     if "image_url" not in colonnes:
         await db.execute("ALTER TABLE produits ADD COLUMN image_url TEXT DEFAULT ''")
         logger.info("Migration: colonne 'image_url' ajoutée.")
+    if "derniere_alerte" not in colonnes:
+        await db.execute("ALTER TABLE produits ADD COLUMN derniere_alerte REAL DEFAULT 0")
+        logger.info("Migration: colonne 'derniere_alerte' ajoutée.")
 
 
 async def recuperer_produit(url: str):
@@ -154,6 +158,16 @@ async def recuperer_historique_prix(url: str, limite: int = 60) -> list[dict]:
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in reversed(rows)]
+
+
+async def enregistrer_alerte(url: str, timestamp: float | None = None):
+    """Mémorise l'instant de la dernière alerte envoyée pour ce produit (anti-spam)."""
+    ts = timestamp if timestamp is not None else time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE produits SET derniere_alerte = ? WHERE url = ?", (ts, url)
+        )
+        await db.commit()
 
 
 async def mettre_a_jour_image(url: str, image_url: str):

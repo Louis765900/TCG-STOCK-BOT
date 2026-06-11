@@ -24,6 +24,9 @@ WATCHLIST_CONCURRENCY = int(os.getenv("WATCHLIST_CONCURRENCY", "5"))
 MAX_BLOCKS_BEFORE_SKIP = int(os.getenv("MAX_BLOCKS_BEFORE_SKIP", "3"))
 # Activer le graphique d'historique des prix dans les alertes Discord.
 ENABLE_PRICE_CHART = os.getenv("ENABLE_PRICE_CHART", "true").lower() in {"1", "true", "yes", "on"}
+# Délai minimum (secondes) entre deux alertes pour un même produit. Anti-spam.
+# Défaut 6h: empêche un produit qui "clignote" de flooder le salon Discord.
+ALERT_COOLDOWN = int(os.getenv("ALERT_COOLDOWN", "21600"))
 
 # Mots-clés de recherche globaux par enseigne (Option A validée)
 SEARCH_QUERIES = {
