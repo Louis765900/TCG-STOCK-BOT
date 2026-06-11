@@ -32,10 +32,46 @@ class BaseScraper(ABC):
     def __init__(self, enseigne: str, browser: Browser):
         self.enseigne = enseigne
         self.browser = browser
+        self._last_status: str = "ok"
 
     @abstractmethod
     async def scraper_recherche(self) -> list[dict]:
         pass
+
+    async def scraper_produit(self, url: str) -> dict | None:
+        """Vérifie stock/prix d'une URL produit connue via schema.org + sélecteurs génériques."""
+        try:
+            async with self.get_page_soup(url) as (page, soup):
+                if not soup:
+                    return None
+
+                avail_meta = soup.select_one("meta[itemprop='availability']")
+                if avail_meta:
+                    en_stock = "instock" in avail_meta.get("content", "").lower()
+                else:
+                    indispo = soup.select_one(
+                        ".out-of-stock, .rupture, .indisponible, "
+                        "[class*=out-of-stock], [class*=unavailable]"
+                    )
+                    btn = soup.select_one(
+                        "button.add-to-cart, [data-button-action='add-to-cart'], "
+                        "[class*=add-to-cart], [class*=btn-basket]"
+                    )
+                    en_stock = bool(btn and not indispo)
+
+                prix_meta = soup.select_one("meta[itemprop='price']")
+                if prix_meta:
+                    prix = prix_meta.get("content", "N/A") + "€"
+                else:
+                    prix_el = soup.select_one(
+                        ".price, .product-price, span[itemprop='price'], [class*=price]"
+                    )
+                    prix = prix_el.get_text(strip=True) if prix_el else "N/A"
+
+                return {"en_stock": en_stock, "prix": prix}
+        except Exception as e:
+            logger.warning("[%s] scraper_produit erreur sur %s: %s", self.enseigne, url, e)
+            return None
 
     @asynccontextmanager
     async def get_page_soup(self, url: str):
@@ -71,6 +107,7 @@ class BaseScraper(ABC):
                     f"[{self.enseigne}] Accès bloqué par protection anti-bot"
                 )
 
+            self._last_status = "ok"
             yield page, BeautifulSoup(html, "html.parser")
 
         except ScraperBlockedError:
@@ -78,10 +115,12 @@ class BaseScraper(ABC):
                 "[%s] Site bloqué (anti-bot). Stealth actif: %s",
                 self.enseigne, _STEALTH is not None,
             )
+            self._last_status = "blocked"
             yield page, None
 
         except Exception as e:
             logger.warning("[%s] Erreur chargement %s: %s", self.enseigne, url, e)
+            self._last_status = "timeout"
             yield page, None
 
         finally:

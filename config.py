@@ -16,6 +16,8 @@ MAX_SLEEP = int(os.getenv("MAX_SLEEP", "180"))
 USE_GEMINI_FILTER = os.getenv("USE_GEMINI_FILTER", "false").lower() in {"1", "true", "yes", "on"}
 REQUEST_TIMEOUT_MS = int(os.getenv("REQUEST_TIMEOUT_MS", "30000"))
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() in {"1", "true", "yes", "on"}
+# Fréquence des cycles de recherche (discovery). Ex: 3 = 1 recherche pour 2 watchlist.
+SEARCH_INTERVAL = int(os.getenv("SEARCH_INTERVAL", "3"))
 
 # Mots-clés de recherche globaux par enseigne (Option A validée)
 SEARCH_QUERIES = {

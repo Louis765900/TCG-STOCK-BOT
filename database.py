@@ -6,6 +6,7 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
+
 async def initialiser_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -15,43 +16,105 @@ async def initialiser_db():
                 titre TEXT NOT NULL,
                 enseigne TEXT NOT NULL,
                 en_stock INTEGER NOT NULL,
+                prix TEXT DEFAULT 'N/A',
+                image_url TEXT DEFAULT '',
                 dernier_vu REAL NOT NULL,
                 date_decouverte REAL NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS cycle_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                cycle_num INTEGER NOT NULL,
+                enseigne TEXT NOT NULL,
+                statut TEXT NOT NULL,
+                produits_trouves INTEGER DEFAULT 0,
+                nouveautes INTEGER DEFAULT 0,
+                restocks INTEGER DEFAULT 0,
+                ruptures INTEGER DEFAULT 0,
+                duree_s REAL DEFAULT 0.0
+            )
+        """)
+        await _migrer_colonnes(db)
         await db.commit()
     logger.info("Base de données initialisée.")
 
+
+async def _migrer_colonnes(db):
+    """Ajoute les colonnes manquantes si la table existait avant Chantier 4."""
+    async with db.execute("PRAGMA table_info(produits)") as cursor:
+        colonnes = {row[1] async for row in cursor}
+    if "prix" not in colonnes:
+        await db.execute("ALTER TABLE produits ADD COLUMN prix TEXT DEFAULT 'N/A'")
+        logger.info("Migration: colonne 'prix' ajoutée.")
+    if "image_url" not in colonnes:
+        await db.execute("ALTER TABLE produits ADD COLUMN image_url TEXT DEFAULT ''")
+        logger.info("Migration: colonne 'image_url' ajoutée.")
+
+
 async def recuperer_produit(url: str):
-    """Retourne l'état d'un produit s'il existe."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM produits WHERE url = ?", (url,)) as cursor:
             return await cursor.fetchone()
 
-async def ajouter_produit(url: str, titre: str, enseigne: str, en_stock: bool):
-    """Ajoute un nouveau produit."""
+
+async def recuperer_tous_produits() -> list[dict]:
+    """Retourne tous les produits connus (watchlist)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM produits ORDER BY enseigne, titre"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+
+async def ajouter_produit(url: str, titre: str, enseigne: str, en_stock: bool,
+                          prix: str = "N/A", image_url: str = ""):
     now = time.time()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO produits (url, titre, enseigne, en_stock, dernier_vu, date_decouverte) VALUES (?, ?, ?, ?, ?, ?)",
-            (url, titre, enseigne, int(en_stock), now, now)
+            """INSERT INTO produits
+               (url, titre, enseigne, en_stock, prix, image_url, dernier_vu, date_decouverte)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (url, titre, enseigne, int(en_stock), prix, image_url, now, now)
         )
         await db.commit()
 
-async def mettre_a_jour_stock(url: str, en_stock: bool):
-    """Met à jour le statut de stock d'un produit."""
+
+async def mettre_a_jour_stock(url: str, en_stock: bool, prix: str | None = None):
     now = time.time()
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE produits SET en_stock = ?, dernier_vu = ? WHERE url = ?",
-            (int(en_stock), now, url)
-        )
+        if prix is not None:
+            await db.execute(
+                "UPDATE produits SET en_stock = ?, prix = ?, dernier_vu = ? WHERE url = ?",
+                (int(en_stock), prix, now, url)
+            )
+        else:
+            await db.execute(
+                "UPDATE produits SET en_stock = ?, dernier_vu = ? WHERE url = ?",
+                (int(en_stock), now, url)
+            )
         await db.commit()
+
 
 async def marquer_vu(url: str):
-    """Met à jour uniquement le timestamp dernier_vu."""
     now = time.time()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE produits SET dernier_vu = ? WHERE url = ?", (now, url))
+        await db.commit()
+
+
+async def enregistrer_cycle(timestamp: float, cycle_num: int, enseigne: str, statut: str,
+                             produits_trouves: int, nouveautes: int, restocks: int,
+                             ruptures: int, duree_s: float):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO cycle_logs
+               (timestamp, cycle_num, enseigne, statut, produits_trouves, nouveautes, restocks, ruptures, duree_s)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (timestamp, cycle_num, enseigne, statut, produits_trouves, nouveautes, restocks, ruptures, duree_s)
+        )
         await db.commit()
