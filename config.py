@@ -18,6 +18,12 @@ REQUEST_TIMEOUT_MS = int(os.getenv("REQUEST_TIMEOUT_MS", "30000"))
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() in {"1", "true", "yes", "on"}
 # Fréquence des cycles de recherche (discovery). Ex: 3 = 1 recherche pour 2 watchlist.
 SEARCH_INTERVAL = int(os.getenv("SEARCH_INTERVAL", "3"))
+# Nombre de fiches produit vérifiées en parallèle pendant un cycle watchlist.
+WATCHLIST_CONCURRENCY = int(os.getenv("WATCHLIST_CONCURRENCY", "5"))
+# Blocages consécutifs sur une enseigne avant d'abandonner le reste du cycle.
+MAX_BLOCKS_BEFORE_SKIP = int(os.getenv("MAX_BLOCKS_BEFORE_SKIP", "3"))
+# Activer le graphique d'historique des prix dans les alertes Discord.
+ENABLE_PRICE_CHART = os.getenv("ENABLE_PRICE_CHART", "true").lower() in {"1", "true", "yes", "on"}
 
 # Mots-clés de recherche globaux par enseigne (Option A validée)
 SEARCH_QUERIES = {

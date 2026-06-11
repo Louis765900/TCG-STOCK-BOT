@@ -36,6 +36,18 @@ async def initialiser_db():
                 duree_s REAL DEFAULT 0.0
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS price_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                prix_value REAL NOT NULL,
+                en_stock INTEGER NOT NULL,
+                timestamp REAL NOT NULL
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_price_history_url ON price_history(url)"
+        )
         await _migrer_colonnes(db)
         await db.commit()
     logger.info("Base de données initialisée.")
@@ -116,5 +128,39 @@ async def enregistrer_cycle(timestamp: float, cycle_num: int, enseigne: str, sta
                (timestamp, cycle_num, enseigne, statut, produits_trouves, nouveautes, restocks, ruptures, duree_s)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (timestamp, cycle_num, enseigne, statut, produits_trouves, nouveautes, restocks, ruptures, duree_s)
+        )
+        await db.commit()
+
+
+async def enregistrer_prix(url: str, prix_value: float, en_stock: bool):
+    """Ajoute un point d'historique de prix (seulement si le prix est numérique)."""
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO price_history (url, prix_value, en_stock, timestamp) VALUES (?, ?, ?, ?)",
+            (url, prix_value, int(en_stock), now)
+        )
+        await db.commit()
+
+
+async def recuperer_historique_prix(url: str, limite: int = 60) -> list[dict]:
+    """Retourne l'historique de prix d'un produit, du plus ancien au plus récent."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT prix_value, en_stock, timestamp FROM price_history "
+            "WHERE url = ? ORDER BY timestamp DESC LIMIT ?",
+            (url, limite)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in reversed(rows)]
+
+
+async def mettre_a_jour_image(url: str, image_url: str):
+    """Backfill de l'image d'un produit existant si elle manquait."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE produits SET image_url = ? WHERE url = ? AND (image_url IS NULL OR image_url = '')",
+            (image_url, url)
         )
         await db.commit()

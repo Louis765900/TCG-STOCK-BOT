@@ -6,3 +6,4 @@ aiohttp
 aiosqlite
 google-genai
 aiofiles
+matplotlib
