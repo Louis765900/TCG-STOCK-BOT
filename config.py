@@ -33,13 +33,26 @@ ALERT_COOLDOWN = int(os.getenv("ALERT_COOLDOWN", "21600"))
 # Ajoute ici les noms de sets récents pour suivre les dernières sorties
 # (ex: "pokemon evolutions prismatiques", "pokemon flammes blanches").
 _DEFAULT_KEYWORDS = [
+    # Requêtes larges (fort rendement, couvrent la majorité des produits)
     "cartes pokemon",
-    "coffret pokemon",
-    "elite trainer box pokemon",
-    "booster pokemon",
-    "display pokemon",
-    "bundle pokemon",
-    "tin pokemon",
+    "pokemon booster",
+    "pokemon display",
+    "pokemon coffret",
+    "pokemon etb",
+    "coffret dresseur elite pokemon",
+    "pokemon bundle",
+    "pokemon tin",
+    "coffret ultra premium pokemon",
+    # Sets récents 2025-2026 (les plus chassés)
+    "pokemon mega evolution",
+    "pokemon flammes fantasmagoriques",
+    "pokemon heros transcendants",
+    "pokemon evolutions prismatiques",
+    "pokemon foudre noire",
+    "pokemon flamme blanche",
+    "pokemon aventures ensemble",
+    "pokemon rivalites destinees",
+    "pokemon 151",
 ]
 _env_keywords = [k.strip() for k in os.getenv("SEARCH_KEYWORDS", "").split(",") if k.strip()]
 SEARCH_KEYWORDS = _env_keywords or _DEFAULT_KEYWORDS

@@ -4,6 +4,7 @@ import logging
 import re
 import asyncio
 import time
+import unicodedata
 
 import config
 
@@ -41,45 +42,103 @@ _CACHE_TITRES = {}
 # Dernier appel à l'API pour limiter le débit
 _DERNIER_APPEL_API = 0
 
-MOTS_EXCLUS = [
-    "figurine", "peluche", "mug", "t-shirt", "casquette", "vetement", "vêtement",
-    "pull", "pyjama", "jouet", "puzzle", "cartable", "sac", "montre", "reveil",
-    "réveil", "housse", "drap", "coussin", "bonbon", "chocolat", "cereale",
-    "céréale", "gateau", "gâteau", "pizza", "pate", "pâte", "filo", "brick",
-    "flammekueche", "japonais", "coreen", "coréen", "anglais", "jap", "uk",
+def _normaliser(texte: str) -> str:
+    """Minuscule + suppression des accents, pour un filtrage robuste.
+
+    Les enseignes écrivent tantôt "Pokémon" tantôt "Pokemon" : on compare tout
+    sans accents pour éviter les ratés.
+    """
+    decompose = unicodedata.normalize("NFD", texte.lower())
+    return "".join(c for c in decompose if unicodedata.category(c) != "Mn")
+
+
+# --- Mots à BANNIR (produits hors cartes TCG scellées) -----------------------
+# ATTENTION : on ne bannit que des termes SANS ambiguïté. Les noms de jeux vidéo
+# qui entrent en collision avec des SETS JCC (Écarlate/Violet, Soleil/Lune,
+# Noir/Blanc, Pokémon GO, Légendes...) NE SONT PAS bannis bruts, sinon ils
+# élimineraient les produits voulus.
+_EXCLUS_RAW = [
+    # Jeux vidéo / consoles / apps (termes non ambigus uniquement)
+    "nintendo", "switch", "3ds", "game boy", "console", "cartouche",
+    "jeu video", "amiibo", "scarlet", "tcg pocket", "pokemon sleep",
+    "pokemon unite", "pokemon masters", "donjon mystere", "pokken",
+    "legendes arceus", "legendes z-a", "jeu video pokemon",
+    # Lego / figurines / peluches / jouets
+    "lego", "figurine", "peluche", "funko", "statuette", "marionnette", "jouet",
+    # Textile / accessoires portés
+    "t-shirt", "casquette", "vetement", "pull", "pyjama", "sweat", "chaussettes",
+    "sac", "sac a dos", "cartable", "trousse", "porte-monnaie", "portefeuille",
+    "montre", "tapis de souris",
+    # Livres / guides / mangas
+    "manga", "livre", "guide strategique", "pokedex", "roman", "encyclopedie",
+    "artbook",
+    # Puzzles / jeux de société non-TCG
+    "puzzle", "monopoly", "trivial pursuit", "jeu de societe", "memory",
+    "jeu educatif", "top chrono", "jeu de plateau",
+    # Ménager / déco
+    "mug", "tasse", "lampe", "reveil", "cadre", "sticker mural", "decoration",
+    "housse", "drap", "coussin",
+    # Numérique
+    "carte numerique", "code numerique", "carte virtuelle", "pokemon live",
+    # Cosplay / déguisement
+    "deguisement", "costume", "cosplay", "oreilles pikachu",
+    # Alimentaire
+    "bonbon", "chocolat", "cereale", "gateau", "pizza", "pate", "filo", "brick",
+    "flammekueche",
+    # Éditions étrangères
+    "japonais", "coreen", "anglais", "jap", "uk",
+    # Accessoires de rangement / protection (pas des cartes scellées)
     "portfolio", "classeur", "cahier", "range-cartes", "sleeve", "protege",
-    "protège", "deck box", "boite de rangement", "boîte de rangement", "boitier",
-    "boîtier", "sticker", "autocollant",
+    "deck box", "boite de rangement", "boitier",
+    # Autres TCG
+    "yu-gi-oh", "yugioh", "yu gi oh", "magic the gathering", "one piece",
+    "dragon ball", "lorcana", "marvel snap", "digimon",
+    # Stickers / autocollants génériques (les collections JCC sont en liste blanche)
+    "sticker", "autocollant",
 ]
 
-MOTS_TCG = [
-    "booster", "display", "coffret", "etb", "elite trainer box", "carte",
-    "cartes", "pack", "bundle", "blister", "box", "tin", "pokebox", "pokébox",
-    "deck", "pokemon", "pokémon",
+# --- Mots indiquant un produit JCC valide ------------------------------------
+_TCG_RAW = [
+    "booster", "display", "coffret", "etb", "elite trainer box",
+    "dresseur d'elite", "dresseur elite", "carte", "cartes", "pack", "bundle",
+    "blister", "box", "tin", "pokebox", "pokeball tin", "deck", "tripack",
+    "duopack", "jcc", "scelle", "pokemon",
 ]
 
-# Liste blanche : produits explicitement voulus qui contiennent un mot normalement
-# exclu (ex: "sticker"). Une correspondance ici force la validation.
-MOTS_PRIORITAIRES = [
+# --- Liste blanche : produits voulus contenant un mot normalement exclu -------
+# Ex : "Collection autocollant Évolutions Prismatiques" est un produit JCC,
+# mais "autocollant" est banni. La liste blanche prime sur les exclusions.
+_PRIORITAIRES_RAW = [
     "sticker day",
+    "collection autocollant",
+    "tripack autocollant",
+    "collection poster",
+    "coffret collection poster",
+    "avant-premiere",
+    "avant premiere",
+    "classeur booster",
 ]
+
+MOTS_EXCLUS = [_normaliser(m) for m in _EXCLUS_RAW]
+MOTS_TCG = [_normaliser(m) for m in _TCG_RAW]
+MOTS_PRIORITAIRES = [_normaliser(m) for m in _PRIORITAIRES_RAW]
 
 
 def est_tcg_valide_local(titre: str) -> bool:
     """Filtre local deterministe: rapide, stable, sans quota externe."""
-    titre_lower = titre.lower().strip()
-    if not titre_lower:
+    titre_norm = _normaliser(titre).strip()
+    if not titre_norm:
         return False
 
     # La liste blanche prime sur les exclusions.
-    if any(mot in titre_lower for mot in MOTS_PRIORITAIRES):
+    if any(mot in titre_norm for mot in MOTS_PRIORITAIRES):
         return True
 
-    if any(mot in titre_lower for mot in MOTS_EXCLUS):
+    if any(mot in titre_norm for mot in MOTS_EXCLUS):
         logger.debug("Rejete par filtre local (mot exclu): %s", titre)
         return False
 
-    if not any(mot in titre_lower for mot in MOTS_TCG):
+    if not any(mot in titre_norm for mot in MOTS_TCG):
         logger.debug("Rejete par filtre local (aucun mot-cle TCG): %s", titre)
         return False
 
