@@ -1,0 +1,36 @@
+# Environnement
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Base de données
+*.db
+*.sqlite3
+
+# Debug dumps (HTML temporaires)
+debug_erreur_*.html
+cultura.html
+
+# Fichiers de dev/refactoring temporaires
+refactor.py
+fix_indent.py
+list_models.py
+test_gemini.py
+test_cultura.py
+dump_cultura.py
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,8 @@
+python-dotenv
+beautifulsoup4
+playwright
+playwright-stealth
+aiohttp
+aiosqlite
+google-genai
+aiofiles
