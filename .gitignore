@@ -27,9 +27,12 @@ test_gemini.py
 test_cultura.py
 dump_cultura.py
 
-# IDE
+# IDE / éditeurs / outils (config perso, hors projet)
 .vscode/
 .idea/
+.obsidian/
+.agents/
+skills-lock.json
 
 # OS
 .DS_Store

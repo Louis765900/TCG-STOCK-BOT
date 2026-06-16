@@ -57,6 +57,8 @@ def normalize_product(prod: dict, enseigne: str) -> dict:
         "in_stock": bool(prod.get("en_stock")),
         "stock_quantity": normalize_stock_quantity(prod.get("stock_quantity")),
         "ean": clean_ean(prod.get("ean")),
+        "brand": clean_text(prod.get("brand")),
+        "seller": clean_text(prod.get("seller")),
         "direct_links": prod.get("direct_links") or {},
     }
 

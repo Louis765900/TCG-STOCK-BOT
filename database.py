@@ -116,6 +116,14 @@ async def mettre_a_jour_stock(url: str, en_stock: bool, prix: str | None = None)
         await db.commit()
 
 
+async def supprimer_produit(url: str):
+    """Retire un produit de la watchlist (et son historique de prix)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM produits WHERE url = ?", (url,))
+        await db.execute("DELETE FROM price_history WHERE url = ?", (url,))
+        await db.commit()
+
+
 async def marquer_vu(url: str):
     now = time.time()
     async with aiosqlite.connect(DB_PATH) as db:
@@ -145,6 +153,15 @@ async def enregistrer_prix(url: str, prix_value: float, en_stock: bool):
             (url, prix_value, int(en_stock), now)
         )
         await db.commit()
+
+
+async def purger_historique_prix(jours: int = 90) -> int:
+    """Supprime les points d'historique plus vieux que `jours` (garde la base légère)."""
+    limite = time.time() - jours * 86400
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("DELETE FROM price_history WHERE timestamp < ?", (limite,))
+        await db.commit()
+        return cur.rowcount or 0
 
 
 async def recuperer_historique_prix(url: str, limite: int = 60) -> list[dict]:

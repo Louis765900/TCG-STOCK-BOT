@@ -7,7 +7,10 @@ logger = logging.getLogger(__name__)
 
 
 class GrandeRecreScraper(BaseScraper):
-    # Attendre le rendu JS des cartes produit
+    # La Grande Recre sert ses pages sans protection : HTTP simple d'abord.
+    http_first = True
+
+    # Attendre le rendu JS des cartes produit (utilise seulement en fallback navigateur)
     wait_selector = ".c-product-tile, .product-tile, .product-miniature, [class*=product-tile]"
 
     def __init__(self, browser):

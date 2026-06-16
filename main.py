@@ -7,8 +7,11 @@ from playwright.async_api import async_playwright
 
 import config
 import database
-from filter_utils import est_tcg_valide
-from discord_webhook import envoyer_alerte
+import bot_state
+from filter_utils import est_tcg_valide, est_tcg_valide_local
+from discord_webhook import envoyer_alerte, envoyer_message
+from stock_state import evaluer_transition, RESTOCK, RUPTURE
+from store_health import StoreHealth
 from cycle_report import CycleReport, StoreReport
 from product_format import STORE_COLORS, parse_price
 from price_chart import generer_graphique_prix
@@ -19,12 +22,17 @@ from scrapers.kingjouet import KingJouetScraper
 from scrapers.smyths import SmythsScraper
 from scrapers.granderecre import GrandeRecreScraper
 from scrapers.auchan import AuchanScraper
+from scrapers.shopify import ShopifyScraper
+from scrapers.woocommerce import WooCommerceScraper
 
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger("main")
+
+# Suivi de la santé des enseignes : met en veille celles qui échouent en boucle.
+_sante = StoreHealth(seuil=config.STORE_PAUSE_THRESHOLD, pause_s=config.STORE_PAUSE_DURATION)
 
 
 # ----------------------------------------------------------------------------
@@ -39,19 +47,27 @@ async def _enregistrer_prix(url: str, prix_str: str, en_stock: bool):
 
 async def _alerter(prod: dict, enseigne: str, type_alerte: str):
     """
-    Envoie une alerte Discord (avec graphique si dispo), sauf si le produit a
-    déjà été alerté il y a moins de ALERT_COOLDOWN secondes (anti-spam).
+    Envoie une alerte Discord (avec graphique si dispo).
+
+    La surveillance par différence d'état (cf. stock_state.py) garantit déjà qu'on
+    n'alerte que sur une transition. Ici on ajoute seulement une courte fenêtre
+    anti-doublon (ALERT_DEDUP_WINDOW) pour absorber un éventuel clignotement, sans
+    étouffer un vrai restock qui reviendrait plus tard.
     """
+    if bot_state.alertes_en_pause():
+        logger.info("Alertes en pause (/pause) — '%s' ignoré.", prod.get("titre", ""))
+        return
+
     url = prod.get("url", "")
     now = time.time()
 
     row = await database.recuperer_produit(url)
     if row is not None:
         derniere = row["derniere_alerte"] or 0
-        if now - derniere < config.ALERT_COOLDOWN:
-            restant = int((config.ALERT_COOLDOWN - (now - derniere)) / 60)
+        if now - derniere < config.ALERT_DEDUP_WINDOW:
+            restant = int((config.ALERT_DEDUP_WINDOW - (now - derniere)) / 60)
             logger.info(
-                "Alerte ignorée (cooldown ~%dmin restantes) [%s]: %s",
+                "Alerte ignorée (doublon, ~%dmin restantes) [%s]: %s",
                 restant, enseigne, prod.get("titre", ""),
             )
             return
@@ -69,10 +85,20 @@ async def _alerter(prod: dict, enseigne: str, type_alerte: str):
 # ----------------------------------------------------------------------------
 # Cycle de découverte (pages recherche)
 # ----------------------------------------------------------------------------
-async def cycle_recherche(scrapers_map: dict, cycle_num: int) -> CycleReport:
+async def cycle_recherche(scrapers_map: dict, cycle_num: int,
+                          amorcage: bool = False) -> CycleReport:
+    """
+    amorcage=True (1er démarrage, base vide) : on enregistre les produits SANS
+    alerter, pour éviter d'inonder Discord de dizaines d'alertes au lancement.
+    """
     rapport = CycleReport(cycle_num=cycle_num, mode="recherche")
 
     for enseigne, scraper in scrapers_map.items():
+        if _sante.en_veille(enseigne):
+            logger.info("[%s] En veille (~%dmin restantes), cycle sauté.",
+                        enseigne, _sante.minutes_restantes(enseigne))
+            continue
+
         store = StoreReport(enseigne=enseigne)
         try:
             produits = await scraper.scraper_recherche()
@@ -90,7 +116,7 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int) -> CycleReport:
                         url = prod["url"]
                         en_stock = prod["en_stock"]
 
-                        if not await est_tcg_valide(titre):
+                        if not await est_tcg_valide(titre, prod.get("brand", "")):
                             continue
 
                         # Historique de prix seedé dès la découverte.
@@ -107,7 +133,7 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int) -> CycleReport:
                                 image_url=prod.get("image_url", ""),
                             )
                             store.nouveautes += 1
-                            if en_stock:
+                            if en_stock and not amorcage:
                                 await _alerter(prod, enseigne, "NOUVEAUTE")
                         else:
                             # Produit déjà connu : la recherche ne fait QUE rafraîchir
@@ -129,6 +155,9 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int) -> CycleReport:
             store.terminer("timeout")
             logger.error("[%s] Echec scraper: %s", enseigne, e)
 
+        if _sante.enregistrer(enseigne, store.statut):
+            logger.warning("[%s] Mise en veille %dmin (échecs répétés).",
+                           enseigne, config.STORE_PAUSE_DURATION // 60)
         rapport.ajouter_store(store)
         await _logger_store(cycle_num, rapport.timestamp, store)
 
@@ -158,6 +187,10 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
         scraper = scrapers_map.get(enseigne)
         if not scraper:
             logger.warning("Pas de scraper pour '%s', ignoré.", enseigne)
+            continue
+        if _sante.en_veille(enseigne):
+            logger.info("[%s] En veille (~%dmin restantes), watchlist sautée.",
+                        enseigne, _sante.minutes_restantes(enseigne))
             continue
 
         store = StoreReport(enseigne=enseigne)
@@ -202,6 +235,9 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
         else:
             store.terminer("healthy")
 
+        if _sante.enregistrer(enseigne, store.statut):
+            logger.warning("[%s] Mise en veille %dmin (échecs répétés).",
+                           enseigne, config.STORE_PAUSE_DURATION // 60)
         rapport.ajouter_store(store)
         await _logger_store(cycle_num, rapport.timestamp, store)
 
@@ -214,6 +250,15 @@ async def _traiter_resultat_watchlist(enseigne: str, item: dict, res: dict, stor
     en_stock_actuel = res["en_stock"]
     prix_actuel = res.get("prix", "N/A")
     ancien_stock = bool(item["en_stock"])
+
+    # Garde-fou : un produit hors-cible (jouet, livre, food…) peut subsister en base
+    # s'il a été ajouté avant un durcissement du filtre. On re-valide ici (titre +
+    # marque fraîche) AVANT toute alerte : si ce n'est pas du JCC Pokémon scellé, on
+    # le purge et on n'alerte jamais. C'est le filet qui garantit zéro alerte parasite.
+    if not est_tcg_valide_local(item["titre"], res.get("brand", "")):
+        logger.info("Purge watchlist (hors-cible) [%s]: %s", enseigne, item["titre"])
+        await database.supprimer_produit(url)
+        return
 
     await _enregistrer_prix(url, prix_actuel, en_stock_actuel)
 
@@ -230,19 +275,58 @@ async def _traiter_resultat_watchlist(enseigne: str, item: dict, res: dict, stor
         "en_stock": en_stock_actuel,
         "country": "FR",
         "direct_links": {enseigne: url},
+        # Champs enrichis (donnees structurees schema.org), si disponibles.
+        "ean": res.get("ean", ""),
+        "brand": res.get("brand", ""),
+        "seller": res.get("seller", ""),
+        "reference": res.get("reference", ""),
+        "stock_quantity": res.get("stock_quantity"),
     }
 
-    if en_stock_actuel and not ancien_stock:
+    # Décision centralisée : on n'agit que sur une vraie transition d'état.
+    # (Cette fonction n'est appelée que sur une lecture fiable, statut "ok".)
+    action = evaluer_transition(ancien_stock, en_stock_actuel)
+
+    if action == RESTOCK:
         logger.info("RESTOCK WATCHLIST [%s]: %s", enseigne, item["titre"])
         await database.mettre_a_jour_stock(url, True, prix_actuel)
         await _alerter(prod_alerte, enseigne, "RESTOCK")
         store.restocks += 1
-    elif not en_stock_actuel and ancien_stock:
+    elif action == RUPTURE:
         logger.info("RUPTURE WATCHLIST [%s]: %s", enseigne, item["titre"])
         await database.mettre_a_jour_stock(url, False, prix_actuel)
         store.ruptures += 1
     else:
+        # Pas de changement de stock : on regarde une éventuelle BAISSE DE PRIX
+        # (deal) sur un produit déjà en stock, par rapport au prix précédent.
+        if en_stock_actuel and config.DEAL_DROP_PERCENT > 0:
+            ancien_prix = parse_price(item.get("prix"))
+            nouveau_prix = parse_price(prix_actuel)
+            if ancien_prix and nouveau_prix and nouveau_prix < ancien_prix:
+                baisse = float((ancien_prix - nouveau_prix) / ancien_prix * 100)
+                if baisse >= config.DEAL_DROP_PERCENT:
+                    logger.info("DEAL [%s]: %s (-%.0f%%)", enseigne, item["titre"], baisse)
+                    prod_deal = dict(prod_alerte, old_price=str(ancien_prix))
+                    await _alerter(prod_deal, enseigne, "DEAL")
         await database.mettre_a_jour_stock(url, en_stock_actuel, prix_actuel)
+
+
+async def _purger_watchlist() -> int:
+    """Nettoie la base des produits hors-cible (déchets accumulés avant durcissement
+    du filtre : bières, Smartbox, livres, jouets…). Title-only (la marque n'est pas
+    stockée) ; un produit douteux sera de toute façon re-validé en watchlist. Tourne
+    à chaque démarrage : self-healing, sans risque pour les vrais produits JCC."""
+    produits = await database.recuperer_tous_produits()
+    purges = 0
+    for p in produits:
+        if not est_tcg_valide_local(p["titre"]):
+            await database.supprimer_produit(p["url"])
+            logger.info("Purge démarrage (hors-cible) [%s]: %s", p["enseigne"], p["titre"])
+            purges += 1
+    if purges:
+        logger.warning("Purge démarrage : %d produits hors-cible retirés (%d conservés).",
+                       purges, len(produits) - purges)
+    return purges
 
 
 async def _logger_store(cycle_num: int, timestamp: float, store: StoreReport):
@@ -260,6 +344,41 @@ async def _logger_store(cycle_num: int, timestamp: float, store: StoreReport):
 
 
 # ----------------------------------------------------------------------------
+# Heartbeat : résumé périodique sur Discord (preuve de vie)
+# ----------------------------------------------------------------------------
+def _build_heartbeat_embed(nb_surveilles: int, restocks: int, nouveautes: int,
+                           cycles: int, dernier_rapport) -> dict:
+    sains, bloques = [], []
+    if dernier_rapport is not None:
+        sains = [s.enseigne for s in dernier_rapport.stores if s.statut == "healthy"]
+        bloques = [s.enseigne for s in dernier_rapport.stores
+                   if s.statut in ("blocked", "timeout", "parser_error", "empty")]
+    return {
+        "title": "💓 TCG-STOCK-BOT — résumé",
+        "color": 0x2ECC71,
+        "fields": [
+            {"name": "Produits surveillés", "value": str(nb_surveilles), "inline": True},
+            {"name": "Cycles", "value": str(cycles), "inline": True},
+            {"name": "Restocks", "value": str(restocks), "inline": True},
+            {"name": "Nouveautés", "value": str(nouveautes), "inline": True},
+            {"name": "Enseignes OK", "value": ", ".join(sains) or "—", "inline": False},
+            {"name": "Enseignes en difficulté", "value": ", ".join(bloques) or "—", "inline": False},
+        ],
+        "footer": {"text": "Bot en vie ✅"},
+    }
+
+
+async def _envoyer_heartbeat(restocks: int, nouveautes: int, cycles: int, dernier_rapport):
+    try:
+        produits = await database.recuperer_tous_produits()
+        embed = _build_heartbeat_embed(len(produits), restocks, nouveautes, cycles, dernier_rapport)
+        await envoyer_message(embed)
+        logger.info("Heartbeat envoyé (%d produits surveillés).", len(produits))
+    except Exception as e:
+        logger.warning("Échec envoi heartbeat: %s", e)
+
+
+# ----------------------------------------------------------------------------
 # Boucle principale
 # ----------------------------------------------------------------------------
 async def main_loop():
@@ -270,11 +389,28 @@ async def main_loop():
         filtre, config.SEARCH_INTERVAL, config.WATCHLIST_CONCURRENCY,
     )
     await database.initialiser_db()
+    purges = await database.purger_historique_prix(config.HISTORY_RETENTION_DAYS)
+    if purges:
+        logger.info("Historique de prix purgé : %d points anciens supprimés.", purges)
+    # Nettoie les produits hors-cible déjà en base (déchets pré-filtre).
+    await _purger_watchlist()
+
+    # Mode bot (optionnel) : démarre la passerelle qui écoute les clics de boutons
+    # (fondation autobuy). L'envoi des alertes reste géré par discord_webhook.
+    bot_task = None
+    if config.DISCORD_BOT_TOKEN and config.DISCORD_CHANNEL_ID:
+        try:
+            import discord_bot
+            bot_task = asyncio.create_task(discord_bot.demarrer())
+            logger.info("Mode bot Discord activé (boutons + écoute autobuy).")
+        except ImportError:
+            logger.warning("discord.py non installé — mode bot ignoré "
+                           "(pip install discord.py).")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
 
-        scrapers_map = {
+        tous_scrapers = {
             "Cultura": CulturaScraper(browser),
             "Leclerc": LeclercScraper(browser),
             "KingJouet": KingJouetScraper(browser),
@@ -282,29 +418,78 @@ async def main_loop():
             "GrandeRecre": GrandeRecreScraper(browser),
             "Auchan": AuchanScraper(browser),
         }
+        # Boutiques Shopify / WooCommerce (API JSON) : ajoutées dynamiquement.
+        for nom, domaine in config.SHOPIFY_SHOPS.items():
+            tous_scrapers[nom] = ShopifyScraper(nom, domaine, browser)
+        for nom, domaine in config.WOO_SHOPS.items():
+            tous_scrapers[nom] = WooCommerceScraper(nom, domaine, browser)
+        # On ne surveille que les enseignes activées (cf. ENABLED_STORES) : évite de
+        # gaspiller des minutes sur les sites blindés qui ne répondent jamais.
+        scrapers_map = {k: v for k, v in tous_scrapers.items() if k in config.ENABLED_STORES}
+        ignorees = [k for k in tous_scrapers if k not in scrapers_map]
+        logger.info("Enseignes actives : %s%s", ", ".join(scrapers_map) or "AUCUNE",
+                    f" (désactivées : {', '.join(ignorees)})" if ignorees else "")
+        if not scrapers_map:
+            logger.error("Aucune enseigne active (ENABLED_STORES vide ?). Arrêt.")
+            return
 
         cycle_num = 0
+        # Compteurs pour le heartbeat (réinitialisés à chaque résumé envoyé).
+        hb_restocks, hb_nouveautes, hb_cycles = 0, 0, 0
+        derniere_heartbeat = time.time()
+        dernier_rapport = None
+
+        # Amorçage : si la base est vide au démarrage, le 1er cycle remplit la
+        # watchlist SANS alerter (évite l'inondation au lancement officiel).
+        amorcage_initial = len(await database.recuperer_tous_produits()) == 0
+        if amorcage_initial:
+            logger.info("Base vide : 1er cycle en AMORÇAGE silencieux (aucune alerte).")
+
         try:
             while True:
                 cycle_num += 1
                 logger.info("=== CYCLE %d ===", cycle_num)
 
-                if cycle_num == 1 or cycle_num % config.SEARCH_INTERVAL == 0:
-                    rapport = await cycle_recherche(scrapers_map, cycle_num)
-                else:
-                    rapport = await cycle_watchlist(scrapers_map, cycle_num)
+                # Résilience : une erreur inattendue dans un cycle ne doit JAMAIS
+                # tuer le bot. On logge et on passe au cycle suivant.
+                try:
+                    if cycle_num == 1 or cycle_num % config.SEARCH_INTERVAL == 0:
+                        rapport = await cycle_recherche(
+                            scrapers_map, cycle_num,
+                            amorcage=(cycle_num == 1 and amorcage_initial),
+                        )
+                    else:
+                        rapport = await cycle_watchlist(scrapers_map, cycle_num)
 
-                logger.info(rapport.resume())
+                    logger.info(rapport.resume())
+                    dernier_rapport = rapport
+                    hb_cycles += 1
+                    hb_restocks += sum(s.restocks for s in rapport.stores)
+                    hb_nouveautes += sum(s.nouveautes for s in rapport.stores)
+                except Exception as e:
+                    logger.error("Erreur cycle %d (le bot continue): %s", cycle_num, e,
+                                 exc_info=True)
 
                 if config.RUN_ONCE:
                     logger.info("RUN_ONCE actif. Arrêt.")
                     break
+
+                # Heartbeat périodique (preuve de vie + bilan).
+                if (config.HEARTBEAT_INTERVAL > 0
+                        and time.time() - derniere_heartbeat >= config.HEARTBEAT_INTERVAL):
+                    await _envoyer_heartbeat(hb_restocks, hb_nouveautes, hb_cycles, dernier_rapport)
+                    hb_restocks, hb_nouveautes, hb_cycles = 0, 0, 0
+                    derniere_heartbeat = time.time()
 
                 duree = random.randint(config.MIN_SLEEP, config.MAX_SLEEP)
                 logger.info("Prochain cycle dans %ds.", duree)
                 await asyncio.sleep(duree)
         finally:
             await browser.close()
+            if bot_task is not None:
+                import discord_bot
+                await discord_bot.arreter()
+                bot_task.cancel()
 
 
 if __name__ == "__main__":

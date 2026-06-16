@@ -7,6 +7,9 @@ logger = logging.getLogger(__name__)
 
 
 class AuchanScraper(BaseScraper):
+    # Auchan sert ses pages sans protection : HTTP simple d'abord (navigateur en secours).
+    http_first = True
+
     def __init__(self, browser):
         super().__init__("Auchan", browser)
         self.url_recherche = SEARCH_QUERIES.get(
