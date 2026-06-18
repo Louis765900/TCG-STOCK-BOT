@@ -4,7 +4,9 @@ import sys
 import json
 import asyncio
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_RACINE, "src"))
+sys.path.insert(0, os.path.join(_RACINE, "desktop"))
 
 import config
 from proxy_fetch import _fournisseurs, fetch_via_proxy

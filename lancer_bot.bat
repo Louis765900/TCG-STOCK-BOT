@@ -47,7 +47,7 @@ if not exist ".env" (
 REM --- Boucle 24h/24 : relance le bot s'il s'arrete ---
 :loop
 echo [%date% %time%] Demarrage du bot... (Ctrl+C pour arreter)
-%PY% main.py
+%PY% src\main.py
 echo [%date% %time%] Bot arrete (code %errorlevel%). Redemarrage dans 15s...
 timeout /t 15 /nobreak >nul
 goto loop

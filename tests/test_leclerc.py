@@ -1,6 +1,8 @@
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_RACINE, "src"))
+sys.path.insert(0, os.path.join(_RACINE, "desktop"))
 
 from scrapers.leclerc import LeclercScraper
 

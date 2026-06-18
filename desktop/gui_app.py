@@ -18,6 +18,12 @@ import os
 import sys
 import logging
 
+# Le cœur du bot vit dans ../src ; on l'ajoute au chemin d'import (en dev ;
+# une fois empaqueté par PyInstaller, tout est déjà regroupé).
+if not getattr(sys, "frozen", False):
+    _RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.join(_RACINE, "src"))
+
 from PySide6.QtCore import QUrl, QTimer
 from PySide6.QtGui import QIcon, QPixmap, QAction
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu

@@ -1,7 +1,7 @@
 """
 Vérifie que l'interface QML se charge sans erreur (sans afficher de fenêtre).
 
-Usage : python tools/verifier_qml.py
+Usage : python desktop/verifier_qml.py
 Utilise la plateforme Qt 'offscreen' : aucune fenêtre, idéal pour un check rapide
 ou une CI. Sort en code 0 si l'IHM charge, 1 sinon.
 """
@@ -9,7 +9,9 @@ import os
 import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ICI = os.path.dirname(os.path.abspath(__file__))          # dossier desktop/
+sys.path.insert(0, _ICI)                                   # modules de l'appli
+sys.path.insert(0, os.path.join(os.path.dirname(_ICI), "src"))  # cœur du bot
 
 from PySide6.QtCore import QUrl, QTimer
 from PySide6.QtGui import QGuiApplication
@@ -18,8 +20,7 @@ from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterSingletonType
 import config  # noqa: F401  (applique la config)
 from gui_bridge import GuiBridge
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GUI_DIR = os.path.join(BASE, "gui")
+GUI_DIR = os.path.join(_ICI, "gui")
 
 _erreurs = []
 

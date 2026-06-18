@@ -6,7 +6,8 @@ import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "src"))       # cœur du bot
+sys.path.insert(0, os.path.join(ROOT, "desktop"))   # appli graphique (tests GUI)
 sys.path.insert(0, HERE)
 
 noms = sorted(f[:-3] for f in os.listdir(HERE)

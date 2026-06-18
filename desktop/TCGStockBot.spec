@@ -11,11 +11,15 @@ fonctionnel en « mode léger ».
 """
 import os
 
+# Racine du projet (le cœur du bot est dans ../src).
+_RACINE = os.path.abspath(os.path.join(os.getcwd(), ".."))
+
 # Données embarquées : l'interface QML + l'icône, et les réglages pré-remplis
-# (bundled_settings.json) s'ils existent (pour livrer la machine de Tom prête).
+# (bundled_settings.json, à la racine) s'ils existent (pour livrer Tom prêt).
 datas = [("gui", "gui")]
-if os.path.exists("bundled_settings.json"):
-    datas.append(("bundled_settings.json", "."))
+_bundled = os.path.join(_RACINE, "bundled_settings.json")
+if os.path.exists(_bundled):
+    datas.append((_bundled, "."))
 
 # Modules que PyInstaller pourrait ne pas détecter tout seul.
 hiddenimports = ["aiosqlite", "aiofiles"]
@@ -31,7 +35,7 @@ excludes = [
 
 a = Analysis(
     ["gui_app.py"],
-    pathex=[],
+    pathex=[_RACINE, os.path.join(_RACINE, "src")],  # trouve le cœur du bot
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,

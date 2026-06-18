@@ -6,7 +6,9 @@ import time
 import asyncio
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_RACINE, "src"))
+sys.path.insert(0, os.path.join(_RACINE, "desktop"))
 
 import config
 import bot_state

@@ -1,7 +1,9 @@
 """Tests du filtre TCG : garde Pokémon + One Piece FR scellés, rejette le reste."""
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_RACINE, "src"))
+sys.path.insert(0, os.path.join(_RACINE, "desktop"))
 
 from filter_utils import est_tcg_valide_local as v
 
