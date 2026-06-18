@@ -4,6 +4,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote_plus
 import re
+import unicodedata
 
 
 COUNTRY_FLAGS = {
@@ -176,15 +177,69 @@ def parse_price(value: str) -> Decimal | None:
         return None
 
 
+# Mots ignorés dans une recherche Cardmarket : conditionnement, langue, nom du
+# jeu (déjà présent dans l'URL) et petits mots de liaison. Comparés en minuscules
+# et sans accents. Les types de produits Cardmarket (display, booster, blister,
+# tin, etb…) sont volontairement CONSERVÉS.
+_BRUIT_CARDMARKET = {
+    # conditionnement / état
+    "scelle", "scellee", "scelles", "scellees", "sealed", "neuf", "neuve", "sous",
+    # langue / région
+    "fr", "francais", "francaise", "vf", "vo", "en", "anglais", "anglaise",
+    "english", "japonais", "japonaise", "jap", "jp", "version", "langue",
+    # nom du jeu (déjà dans l'URL Cardmarket) + liaisons
+    "pokemon", "one", "piece", "onepiece", "jcc", "tcg", "ccg", "jeu", "jeux",
+    "de", "des", "du", "la", "le", "les", "un", "une", "et", "the",
+    "carte", "cartes", "trading", "card", "cards", "game",
+    # bruit marketing
+    "officiel", "officielle", "edition", "collector", "produit",
+}
+
+_MAX_MOTS_CARDMARKET = 5
+
+
+def _sans_accents(texte: str) -> str:
+    nfkd = unicodedata.normalize("NFKD", texte)
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def mots_cles_recherche(title: str) -> str:
+    """Réduit un titre produit à des mots-clés propres pour une recherche.
+
+    Retire le conditionnement (« scellé »), la langue, le nom du jeu et les petits
+    mots de liaison ; garde les termes identifiants (type de produit + set) et
+    limite la requête pour éviter le « aucun résultat » de Cardmarket.
+    Ex. « Pokémon Display M1S scellé français » -> « Display M1S ».
+    """
+    # Recolle les codes de set coupés par un tiret (OP-09 -> OP09, SV-01 -> SV01)
+    # avant de découper, sinon le « - » casserait l'identifiant en deux.
+    texte = re.sub(r"\b([A-Za-z]{1,4})-(\d{1,3})\b", r"\1\2", title or "")
+    mots = re.findall(r"[0-9A-Za-zÀ-ÿ]+", texte)
+    garde: list[str] = []
+    for mot in mots:
+        if len(mot) == 1 and mot.isalpha():
+            continue  # lettres isolées (« d'élite » -> d, élite)
+        if _sans_accents(mot).lower() in _BRUIT_CARDMARKET:
+            continue
+        if garde and garde[-1].lower() == mot.lower():
+            continue  # doublon consécutif
+        garde.append(mot)
+        if len(garde) >= _MAX_MOTS_CARDMARKET:
+            break
+    return " ".join(garde).strip() or clean_text(title)
+
+
 def cardmarket_link(title: str) -> str:
     """Lien de recherche Cardmarket vers le bon jeu (Pokémon ou One Piece).
 
-    Cardmarket n'indexe pas l'EAN : on cherche par le nom du produit. Le lien tombe
-    sur la fiche où l'on voit rareté, tendance des prix et moyennes 7/30 jours.
+    Cardmarket n'indexe pas l'EAN : on cherche par des mots-clés propres tirés du
+    titre (sans « scellé », langue, ni nom du jeu). Le lien tombe sur la fiche où
+    l'on voit rareté, tendance des prix et moyennes 7/30 jours.
     """
     jeu = "OnePiece" if "one piece" in (title or "").lower() else "Pokemon"
+    requete = mots_cles_recherche(title)
     return (f"https://www.cardmarket.com/fr/{jeu}/Products/Search"
-            f"?searchString={quote_plus(title or '')}")
+            f"?searchString={quote_plus(requete)}")
 
 
 def ean_search_links(ean: str, fallback_title: str) -> dict[str, str]:

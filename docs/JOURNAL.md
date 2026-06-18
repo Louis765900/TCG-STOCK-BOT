@@ -1021,3 +1021,29 @@ bout en bout**, comme si on était sur la machine de Tom.
 ### Vérifs
 Tests **11/11**. Build PyInstaller **OK**. Installateur **compilé (123 Mo)**.
 **Installation depuis le Setup testée + app installée lancée = OK.** Désinstallation OK.
+
+---
+
+## 🃏 Chantier 23 — Le bouton Cardmarket cherche enfin le bon produit
+
+**Date :** 18 juin 2026 (bug remonté par Tom en testant)
+
+### Le problème
+En cliquant sur le bouton **Cardmarket** d'une alerte, Cardmarket répondait
+« aucun résultat ». En fait on lui envoyait le **titre complet** du produit, avec
+des mots parasites comme « **scellé** », « français », « Pokémon »… Cardmarket
+cherche presque mot pour mot : trop de mots = zéro résultat.
+
+### La solution
+On **nettoie le titre** avant de chercher : on **garde les mots qui identifient**
+le produit (le **type** : display, booster, coffret… et le **set** : M1S, OP09, 151)
+et on **jette** le reste (« scellé », langue, nom du jeu — déjà dans l'adresse).
+On recolle aussi les codes coupés par un tiret (**OP-09 → OP09**) et on limite à
+5 mots-clés.
+
+> Exemple : « Pokémon **Display M1S** scellé français » → on cherche juste
+> « **Display M1S** ». Et ça trouve la bonne fiche. ✅
+
+### Vérifs
+Tests **11/11** (3 nouveaux cas pour les mots-clés Cardmarket). Essais réels OK
+(Pokémon ET One Piece).

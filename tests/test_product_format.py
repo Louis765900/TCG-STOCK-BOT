@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(_RACINE, "desktop"))
 from product_format import (
     normalize_product, clean_price, clean_ean, compute_discount, format_stock,
     est_vendeur_officiel, est_revendeur, seller_badge, cardmarket_link, ean_search_links,
+    mots_cles_recherche,
 )
 
 
@@ -51,6 +52,16 @@ def test():
     assert "/Pokemon/Products/Search" in cardmarket_link("ETB Pokémon Flammes Obsidiennes")
     assert "/OnePiece/Products/Search" in cardmarket_link("Display One Piece OP05")
     assert "Cardmarket" in ean_search_links("123", "Display One Piece OP05")
+
+    # Mots-clés Cardmarket propres : on retire « scellé », langue et nom du jeu,
+    # on garde les termes identifiants (type + set). (Chantier 22)
+    assert mots_cles_recherche("Pokémon Display M1S scellé français") == "Display M1S"
+    assert mots_cles_recherche("Display One Piece OP05 scellé FR") == "Display OP05"
+    lien = cardmarket_link("Pokémon Display M1S scellé français")
+    assert "scelle" not in lien.lower() and "pokemon" not in lien.split("?")[1].lower()
+    assert "Display+M1S" in lien
+    # Repli : un titre entièrement filtré ne casse pas (garde le titre nettoyé)
+    assert mots_cles_recherche("Pokémon scellé FR") == "Pokémon scellé FR"
 
 
 if __name__ == "__main__":
