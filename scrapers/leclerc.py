@@ -11,6 +11,7 @@ vendeur, EAN et image. On n'utilise donc ni le navigateur ni parse_page HTML.
 
 import asyncio
 import logging
+import random
 import re
 from urllib.parse import quote_plus
 
@@ -26,6 +27,13 @@ API_URL = "https://www.e.leclerc/api/rest/live-api/product-search?text={q}"
 class LeclercScraper(BaseScraper):
 
     utilise_navigateur = False  # API JSON interne, aucun navigateur requis
+
+    # Leclerc limite agressivement le débit (HTTP 429) si on enchaîne les requêtes
+    # en rafale. On interroge donc ses mots-clés UN PAR UN, avec une petite pause
+    # aléatoire entre chacun : un poil plus lent, mais bien plus fiable (fini les
+    # 429). Le retry/backoff de http_fetch reste là pour les coups durs.
+    CONCURRENCE_RECHERCHE = 1
+    DELAI_ENTRE_REQUETES = (0.3, 0.7)
 
     def __init__(self, browser):
         super().__init__("Leclerc", browser)
@@ -110,13 +118,15 @@ class LeclercScraper(BaseScraper):
     # ---------- Recherche (decouverte) ----------
     async def scraper_recherche(self) -> list[dict]:
         logger.info("[%s] Recherche API %d mots-cles...", self.enseigne, len(config.SEARCH_KEYWORDS))
-        sem = asyncio.Semaphore(config.SEARCH_CONCURRENCY)
+        sem = asyncio.Semaphore(self.CONCURRENCE_RECHERCHE)
         statuts: list[str] = []
 
         async def chercher(mot: str) -> list[dict]:
             url = API_URL.format(q=quote_plus(mot))
             async with sem:
                 data, statut, blocage = await http_get_json(url, timeout_ms=config.REQUEST_TIMEOUT_MS)
+                # Petite pause pour rester sous le radar du limiteur de débit.
+                await asyncio.sleep(random.uniform(*self.DELAI_ENTRE_REQUETES))
             statuts.append(statut)
             if statut != "ok" or not isinstance(data, dict):
                 if blocage:

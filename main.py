@@ -32,6 +32,10 @@ logger = logging.getLogger("main")
 # Suivi de la santé des enseignes : met en veille celles qui échouent en boucle.
 _sante = StoreHealth(seuil=config.STORE_PAUSE_THRESHOLD, pause_s=config.STORE_PAUSE_DURATION)
 
+# Compteur d'alertes RÉELLEMENT envoyées sur Discord (≠ nombre de produits
+# découverts). Incrémenté seulement quand une alerte part vraiment.
+_compteur_alertes = {"total": 0}
+
 
 # ----------------------------------------------------------------------------
 # Helpers prix + graphique + alerte
@@ -84,6 +88,7 @@ async def _alerter(prod: dict, enseigne: str, type_alerte: str):
         )
     await envoyer_alerte(prod, enseigne, type_alerte, chart_png=chart)
     await database.enregistrer_alerte(url, now)
+    _compteur_alertes["total"] += 1
 
 
 # ----------------------------------------------------------------------------
@@ -472,6 +477,7 @@ async def main_loop(stop_event=None):
     derniere_heartbeat = time.time()
     dernier_rapport = None
     alertes_total = 0
+    _compteur_alertes["total"] = 0
 
     # Amorçage : si la base est vide au démarrage, le 1er cycle remplit la
     # watchlist SANS alerter (évite l'inondation au lancement officiel).
@@ -507,7 +513,9 @@ async def main_loop(stop_event=None):
                 hb_cycles += 1
                 hb_restocks += sum(s.restocks for s in rapport.stores)
                 hb_nouveautes += sum(s.nouveautes for s in rapport.stores)
-                alertes_total += sum(s.restocks + s.nouveautes for s in rapport.stores)
+                # Compteur basé sur les alertes RÉELLEMENT envoyées (pas les
+                # nouveautés : l'amorçage silencieux n'envoie rien).
+                alertes_total = _compteur_alertes["total"]
 
                 # Statut live pour l'interface graphique.
                 try:

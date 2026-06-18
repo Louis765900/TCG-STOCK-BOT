@@ -90,6 +90,12 @@ async def recuperer_tous_produits() -> list[dict]:
 async def ajouter_produit(url: str, titre: str, enseigne: str, en_stock: bool,
                           prix: str = "N/A", image_url: str = ""):
     now = time.time()
+    # Garde-fou : SQLite n'accepte que des types simples. Un champ inattendu
+    # (ex. image renvoyée comme objet par une API) ne doit jamais tout bloquer.
+    if not isinstance(image_url, str):
+        image_url = ""
+    if not isinstance(prix, str):
+        prix = str(prix) if prix is not None else "N/A"
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """INSERT INTO produits
@@ -189,6 +195,8 @@ async def enregistrer_alerte(url: str, timestamp: float | None = None):
 
 async def mettre_a_jour_image(url: str, image_url: str):
     """Backfill de l'image d'un produit existant si elle manquait."""
+    if not isinstance(image_url, str):
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE produits SET image_url = ? WHERE url = ? AND (image_url IS NULL OR image_url = '')",

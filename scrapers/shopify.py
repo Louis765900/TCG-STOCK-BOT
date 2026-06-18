@@ -38,11 +38,21 @@ class ShopifyScraper(BaseScraper):
         return []
 
     @staticmethod
-    def _https(image: str) -> str:
-        """Les images Shopify sont en '//cdn.shopify.com/...' -> on préfixe https:."""
-        if isinstance(image, str) and image.startswith("//"):
+    def _https(image) -> str:
+        """
+        Normalise une image Shopify en URL (chaîne).
+
+        Selon l'endpoint, l'image peut être une chaîne OU un objet
+        ({"url"/"src": ...}) — il faut donc toujours retomber sur une chaîne,
+        sinon on insère un dict en base (→ 'type dict is not supported').
+        """
+        if isinstance(image, dict):
+            image = image.get("url") or image.get("src") or ""
+        if not isinstance(image, str):
+            return ""
+        if image.startswith("//"):
             return "https:" + image
-        return image or ""
+        return image
 
     # ---------- Recherche (découverte) : /search/suggest.json ----------
     def _produit_depuis_suggest(self, p: dict) -> dict | None:

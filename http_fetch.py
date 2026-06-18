@@ -37,6 +37,37 @@ _USER_AGENTS = [
 # Codes HTTP typiques d'un blocage anti-bot.
 _CODES_BLOQUES = {401, 403, 405, 429, 451, 503}
 
+# Codes de throttling temporaire : on RÉESSAIE (avec attente) au lieu d'abandonner.
+# Beaucoup d'enseignes (ex. Leclerc) répondent 429/503 quand on enchaîne trop de
+# requêtes d'un coup, mais acceptent si on patiente une seconde.
+_CODES_THROTTLE = {429, 503}
+_MAX_RETRIES_THROTTLE = 2
+
+
+async def _get_avec_backoff(session, url):
+    """
+    GET en respectant le throttling : sur 429/503, attend (Retry-After si fourni,
+    sinon court backoff) puis réessaie. Retourne (status_code, texte | None).
+    """
+    for tentative in range(_MAX_RETRIES_THROTTLE + 1):
+        async with session.get(url, allow_redirects=True) as resp:
+            if resp.status in _CODES_THROTTLE and tentative < _MAX_RETRIES_THROTTLE:
+                entete = resp.headers.get("Retry-After")
+                delai = None
+                if entete:
+                    try:
+                        delai = min(float(entete), 8.0)
+                    except ValueError:
+                        delai = None
+                if delai is None:
+                    delai = 1.2 * (tentative + 1) + random.uniform(0, 0.6)
+                logger.debug("Throttle %s sur %s — pause %.1fs (essai %d).",
+                             resp.status, url, delai, tentative + 1)
+                await asyncio.sleep(delai)
+                continue
+            return resp.status, await resp.text(errors="ignore")
+    return resp.status, None  # dernier essai encore throttlé
+
 
 def _headers() -> dict:
     return {
@@ -63,12 +94,11 @@ async def http_get(url: str, *, timeout_ms: int = 30000) -> tuple[Optional[str],
     timeout = aiohttp.ClientTimeout(total=max(timeout_ms / 1000, 5))
     try:
         async with aiohttp.ClientSession(timeout=timeout, headers=_headers()) as session:
-            async with session.get(url, allow_redirects=True) as resp:
-                if resp.status in _CODES_BLOQUES:
-                    return None, "blocked", f"http_{resp.status}"
-                if resp.status >= 400:
-                    return None, "timeout", f"http_{resp.status}"
-                html = await resp.text(errors="ignore")
+            status, html = await _get_avec_backoff(session, url)
+            if status in _CODES_BLOQUES:
+                return None, "blocked", f"http_{status}"
+            if status >= 400 or html is None:
+                return None, "timeout", f"http_{status}"
     except asyncio.TimeoutError:
         return None, "timeout", "timeout"
     except aiohttp.ClientError as e:
@@ -99,12 +129,11 @@ async def http_get_json(url: str, *, timeout_ms: int = 30000,
     timeout = aiohttp.ClientTimeout(total=max(timeout_ms / 1000, 5))
     try:
         async with aiohttp.ClientSession(timeout=timeout, headers=h) as session:
-            async with session.get(url, allow_redirects=True) as resp:
-                if resp.status in _CODES_BLOQUES:
-                    return None, "blocked", f"http_{resp.status}"
-                if resp.status >= 400:
-                    return None, "timeout", f"http_{resp.status}"
-                texte = await resp.text(errors="ignore")
+            status, texte = await _get_avec_backoff(session, url)
+            if status in _CODES_BLOQUES:
+                return None, "blocked", f"http_{status}"
+            if status >= 400 or texte is None:
+                return None, "timeout", f"http_{status}"
     except asyncio.TimeoutError:
         return None, "timeout", "timeout"
     except aiohttp.ClientError as e:
