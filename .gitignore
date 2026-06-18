@@ -37,3 +37,6 @@ skills-lock.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Captures de l'interface (artefacts de dev)
+tools/apercu.png

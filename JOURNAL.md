@@ -893,3 +893,46 @@ bat pas avec le bot pour le même verrou. C'est ce qu'utilise le compositeur de 
 Tests **11/11** (nouveau `test_gui_bridge.py` : couleurs, réglages, watchlist sur une
 base temporaire, capture des logs, envoi composé simulé, et un **vrai test du pont Qt**
 qui démarre une mini-appli Qt et vérifie qu'un log arrive bien à l'écran).
+
+---
+
+## 🎨 Chantier C — La fenêtre (enfin du visuel !)
+
+**Date :** 18 juin 2026
+
+Troisième brique : **l'interface graphique** qu'on voit et qu'on clique. Style inspiré
+de **NixOS / Hyprland** : fenêtre **sans bord, aux coins arrondis**, sombre, avec une
+**lueur bleue** discrète en haut, des **cartes** translucides et des **animations
+douces**. Palette « Tokyo Night » (bleu/violet sur fond sombre). On lance avec
+`python gui_app.py`.
+
+### Les 6 écrans
+1. **🏠 Accueil** — l'état du bot (gros voyant vert qui **pulse** quand ça tourne),
+   le bouton **Démarrer / Arrêter**, le temps de fonctionnement, et 3 chiffres clés
+   (produits surveillés, alertes envoyées, cycle). En dessous : l'état des enseignes.
+2. **📡 Surveillance** — la **liste des produits suivis** (avec pastille de stock,
+   prix, et une corbeille pour en retirer un).
+3. **✏️ Composer** — pour **écrire un message Discord** à la main, avec un **aperçu en
+   direct** façon Discord (titre, texte, image, couleur au choix) et un bouton Envoyer.
+4. **📜 Journal** — ce que **fait le bot en temps réel**, ligne par ligne, en couleurs
+   (vert = restock/nouveauté, jaune = avertissement, rouge = erreur), avec un suivi
+   automatique vers le bas.
+5. **⚙️ Réglages** — la connexion Discord (jeton/salon ou webhook), les enseignes
+   actives, la vitesse, le seuil de baisse de prix, et l'option « masquer les
+   revendeurs ». Tout s'enregistre dans un fichier (pas besoin de toucher au code).
+6. **🪄 Assistant** — au **tout premier lancement** (si rien n'est encore configuré),
+   un petit guide en 3 étapes branche Discord pour Tom, sans qu'il ait rien à bidouiller.
+
+### Comment c'est fait (pour s'y retrouver)
+- `gui_app.py` : le **lanceur** (crée l'appli Qt, branche le pont, ouvre la fenêtre).
+- `gui/Theme.qml` : **toutes les couleurs et tailles** au même endroit (le « thème »).
+- `gui/Main.qml` : la **fenêtre** (barre de titre maison, barre latérale, pages).
+- `gui/*.qml` : les **briques** (boutons, cartes, champs, voyant…) et les **pages**.
+- La fenêtre se **déplace** en tirant la barre du haut, se **redimensionne** par le
+  coin bas-droit, et a ses propres boutons **réduire / fermer**.
+
+### Vérifs
+Tests **11/11** toujours bons. Nouveau garde-fou : `tools/verifier_qml.py` charge
+l'interface **sans afficher de fenêtre** (mode « offscreen ») et échoue si un écran a
+une erreur → vérifié **OK, zéro erreur**. J'ai aussi **capturé des images** de chacun
+des 6 écrans pour contrôler le rendu : tout est propre et bien aligné.
