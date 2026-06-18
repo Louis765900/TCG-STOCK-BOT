@@ -23,6 +23,19 @@ def _en_arriere_plan(fn, *args):
     threading.Thread(target=fn, args=args, daemon=True).start()
 
 
+def _vers_dict(valeur) -> dict:
+    """Convertit un objet venu du QML (QJSValue / QVariantMap) en dict Python."""
+    if valeur is None:
+        return {}
+    # Un QJSValue (objet JS brut) expose .toVariant() qui donne un dict.
+    if hasattr(valeur, "toVariant"):
+        valeur = valeur.toVariant()
+    try:
+        return dict(valeur)
+    except (TypeError, ValueError):
+        return {}
+
+
 class GuiBridge(QObject):
     # --- signaux vers le QML -------------------------------------------------
     statusChanged = Signal("QVariant")       # statut live (dict) à chaque tick
@@ -112,7 +125,7 @@ class GuiBridge(QObject):
     @Slot("QVariant", result=str)
     def enregistrerReglages(self, reglages):
         try:
-            return app_service.enregistrer_reglages(dict(reglages))
+            return app_service.enregistrer_reglages(_vers_dict(reglages))
         except Exception as e:
             self.erreur.emit(f"Échec sauvegarde : {e}")
             return ""
@@ -138,7 +151,7 @@ class GuiBridge(QObject):
     @Slot("QVariant")
     def envoyerMessage(self, champs):
         """champs : dict {titre, description, couleur, image_url, url, footer, content}."""
-        c = dict(champs)
+        c = _vers_dict(champs)
         def job():
             ok = app_service.envoyer_message_compose(
                 titre=c.get("titre", ""),
