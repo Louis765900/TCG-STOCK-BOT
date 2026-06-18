@@ -3,8 +3,6 @@ import asyncio
 import logging
 import random
 import time
-from playwright.async_api import async_playwright
-
 import config
 import database
 import bot_state
@@ -457,6 +455,9 @@ async def main_loop(stop_event=None):
     playwright_ctx = None
     browser = None
     if any(getattr(s, "utilise_navigateur", True) for s in scrapers_map.values()):
+        # Import paresseux : en mode léger (sources HTTP), Playwright n'est jamais
+        # requis — pratique pour l'app empaquetée qui ne l'embarque pas forcément.
+        from playwright.async_api import async_playwright
         playwright_ctx = await async_playwright().start()
         browser = await playwright_ctx.chromium.launch(headless=True)
         for s in scrapers_map.values():

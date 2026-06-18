@@ -1,11 +1,15 @@
 """Classe de base abstraite pour les scrapers - avec bypass anti-bot avance."""
-from playwright.async_api import Browser, Page
+from __future__ import annotations
+from typing import TYPE_CHECKING
 from bs4 import BeautifulSoup
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus
 import asyncio
 import logging
+
+if TYPE_CHECKING:  # import seulement pour les annotations (pas requis à l'exécution)
+    from playwright.async_api import Browser
 import config
 import anti_bot_bypass
 from structured_data import extraire_donnees_structurees

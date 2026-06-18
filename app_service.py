@@ -20,6 +20,7 @@ from collections import deque
 import config
 import bot_state
 import database
+import autostart
 from bot_controller import controleur
 from product_format import STORE_COLORS
 
@@ -238,3 +239,18 @@ def enregistrer_reglages(reglages: dict) -> str:
 def couleurs_enseignes() -> dict:
     """Pour l'IHM : couleur (hex) par enseigne connue."""
     return {nom: f"#{val:06X}" for nom, val in STORE_COLORS.items()}
+
+
+# ---------------------------------------------------------------------------
+# Démarrage automatique avec Windows
+# ---------------------------------------------------------------------------
+def autostart_disponible() -> bool:
+    return autostart.disponible()
+
+
+def autostart_actif() -> bool:
+    return autostart.est_actif()
+
+
+def definir_autostart(actif: bool) -> bool:
+    return autostart.definir(bool(actif))

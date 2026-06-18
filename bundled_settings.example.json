@@ -1,0 +1,9 @@
+{
+  "_comment": "Réglages PRÉ-REMPLIS embarqués dans l'exe (couche du milieu). Copie ce fichier en 'bundled_settings.json' AVANT de lancer le build pour livrer la machine de Tom déjà configurée — il n'aura alors rien à saisir. NE COMMITE PAS le vrai fichier (il contient le jeton).",
+  "DISCORD_BOT_TOKEN": "",
+  "DISCORD_CHANNEL_ID": "",
+  "DISCORD_WEBHOOK_URL": "https://discord.com/api/webhooks/....",
+  "DISCORD_ALERT_ROLE_ID": "",
+  "ENABLED_STORES": "Auchan,Leclerc,LudiJeux,RelicTCG,CoinBarons",
+  "MASQUER_REVENDEURS": "false"
+}

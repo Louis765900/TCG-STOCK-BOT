@@ -936,3 +936,51 @@ Tests **11/11** toujours bons. Nouveau garde-fou : `tools/verifier_qml.py` charg
 l'interface **sans afficher de fenêtre** (mode « offscreen ») et échoue si un écran a
 une erreur → vérifié **OK, zéro erreur**. J'ai aussi **capturé des images** de chacun
 des 6 écrans pour contrôler le rendu : tout est propre et bien aligné.
+
+---
+
+## 📦 Chantier D — Barre des tâches, démarrage auto, et le `.exe`
+
+**Date :** 18 juin 2026
+
+Quatrième brique : transformer l'appli en **vrai logiciel installable**, pensé pour
+tourner **24h/24** chez Tom, sans qu'il touche à rien.
+
+### 1) Icône dans la barre des tâches (tray)
+L'appli a maintenant une **icône** (un losange dégradé bleu/violet, dessinée par
+`tools/generer_icone.py`). **Fermer la fenêtre ne quitte plus l'appli** : elle se
+**réduit dans la barre des tâches** et le bot **continue de surveiller**. Un clic sur
+l'icône rouvre la fenêtre ; un clic droit donne un menu (Ouvrir, Démarrer/Arrêter le
+bot, **Quitter**). Quitter pour de bon **arrête proprement** le bot.
+
+### 2) Démarrage automatique avec Windows
+Nouveau `autostart.py` + un **interrupteur dans les Réglages** : « Démarrer avec
+Windows ». Activé, l'appli se **relance toute seule** à chaque ouverture de session
+(parfait pour le 24h/24). Ça écrit juste une petite valeur dans le registre de
+l'utilisateur (pas besoin d'administrateur).
+
+### 3) Préparé pour vivre « gelé » dans un .exe
+- Les **données** (base + réglages) vont dans `%APPDATA%\TCGStockBot\` → elles
+  **survivent** aux mises à jour, et l'app n'a pas besoin d'écrire à côté de l'exe.
+- **Playwright devient totalement optionnel à l'import** : en mode léger, l'app
+  n'en dépend même plus (les annotations de type ne le chargent plus). Le navigateur
+  n'est jamais embarqué → installateur bien plus petit.
+
+### 4) L'empaquetage
+- `TCGStockBot.spec` : recette **PyInstaller** (embarque l'interface QML + l'icône,
+  exclut les modules Qt lourds inutiles).
+- `installer.iss` : recette **Inno Setup** → un `TCGStockBot-Setup.exe` qui s'installe
+  **sans droits administrateur**, crée les raccourcis, propose le démarrage auto.
+- `build.ps1` : fait **tout en une commande** (PyInstaller → selftest → installateur).
+- `bundled_settings.example.json` : pour livrer la machine de Tom **déjà configurée**
+  (on glisse le webhook dedans avant le build → zéro réglage pour lui).
+- Tout est expliqué dans **`PACKAGING.md`**.
+
+### Un truc malin pour vérifier le build
+L'exe accepte `--selftest` : il **charge l'interface sans l'afficher** et répond OK/échec.
+Le script de build s'en sert pour confirmer que le `.exe` produit est **sain** avant de
+fabriquer l'installateur.
+
+### Vérifs
+Tests **11/11**. Selftest **OK** (en dev). Build PyInstaller lancé et installateur
+prêt à compiler (voir `PACKAGING.md`).

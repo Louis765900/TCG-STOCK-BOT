@@ -1,6 +1,10 @@
 # Environnement
 .env
 
+# Réglages pré-remplis embarqués (contiennent le jeton Discord) — NE PAS commiter.
+# (Seul bundled_settings.example.json, sans secret, est versionné.)
+bundled_settings.json
+
 # Python
 __pycache__/
 *.pyc
@@ -10,6 +14,9 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+# Empaquetage (installateur Inno Setup)
+Output/
 
 # Base de données
 *.db

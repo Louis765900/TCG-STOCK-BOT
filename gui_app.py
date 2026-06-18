@@ -2,10 +2,15 @@
 gui_app.py — Point d'entrée de l'application graphique TCG-STOCK-BOT.
 
 Crée l'application Qt, branche le pont (gui_bridge.GuiBridge) et charge
-l'interface QML (gui/Main.qml). Esthétique NixOS / Hyprland : fenêtre arrondie,
-sombre, animée.
+l'interface QML (gui/Main.qml). Esthétique NixOS / Hyprland.
 
-Lancement : `python gui_app.py`
+Fonctionne aussi bien en développement (`python gui_app.py`) qu'empaquetée en
+.exe (PyInstaller). Ajoute une icône dans la barre des tâches (tray) : fermer la
+fenêtre la réduit dans le tray, le bot continue de tourner 24h/24.
+
+Options :
+  --selftest   charge l'IHM sans fenêtre (offscreen) et quitte (0=OK). Sert à
+               vérifier qu'un build .exe est sain.
 """
 from __future__ import annotations
 
@@ -13,59 +18,135 @@ import os
 import sys
 import logging
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtCore import QUrl, QTimer
+from PySide6.QtGui import QIcon, QPixmap, QAction
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterSingletonType
 
-import config  # applique les couches de configuration au démarrage
-from gui_bridge import GuiBridge
-
-logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
 logger = logging.getLogger("gui_app")
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-GUI_DIR = os.path.join(BASE, "gui")
+
+def _dossier_ressources() -> str:
+    """Dossier des ressources QML : _MEIPASS si empaqueté, sinon le dossier du script."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "gui")
 
 
-def _premier_lancement() -> bool:
-    """Vrai si aucun canal Discord n'est encore configuré (→ assistant)."""
+GUI_DIR = _dossier_ressources()
+
+
+def _premier_lancement(config) -> bool:
     has_webhook = bool(config.DISCORD_WEBHOOK_URL)
     has_bot = bool(config.DISCORD_BOT_TOKEN and config.DISCORD_CHANNEL_ID)
     return not (has_webhook or has_bot)
 
 
+def _charger_icone() -> QIcon:
+    chemin = os.path.join(GUI_DIR, "icon.png")
+    if os.path.exists(chemin):
+        return QIcon(chemin)
+    # Repli : pastille unie (évite une icône vide si le PNG manque).
+    pm = QPixmap(64, 64); pm.fill("#7aa2f7")
+    return QIcon(pm)
+
+
+def _selftest() -> int:
+    """Charge l'IHM en mode offscreen et retourne 0 si tout charge."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    import config  # noqa: F401
+    from gui_bridge import GuiBridge
+    app = QApplication(sys.argv)
+    erreurs = []
+    qmlRegisterSingletonType(QUrl.fromLocalFile(os.path.join(GUI_DIR, "Theme.qml")),
+                             "App", 1, 0, "Theme")
+    engine = QQmlApplicationEngine()
+    engine.warnings.connect(lambda ws: erreurs.extend(str(w.toString()) for w in ws))
+    bridge = GuiBridge()
+    ctx = engine.rootContext()
+    ctx.setContextProperty("bridge", bridge)
+    ctx.setContextProperty("premierLancement", False)
+    ctx.setContextProperty("appVersion", "1.0")
+    engine.load(QUrl.fromLocalFile(os.path.join(GUI_DIR, "Main.qml")))
+    QTimer.singleShot(500, app.quit)
+    app.exec()
+    if not engine.rootObjects():
+        print("SELFTEST ÉCHEC :")
+        for e in erreurs:
+            print("  -", e)
+        return 1
+    print("SELFTEST OK")
+    return 0
+
+
 def main() -> int:
-    QGuiApplication.setApplicationName("TCG Stock Bot")
-    QGuiApplication.setOrganizationName("TCGStockBot")
-    app = QGuiApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(True)
+    if "--selftest" in sys.argv:
+        return _selftest()
 
-    icone = os.path.join(GUI_DIR, "icon.png")
-    if os.path.exists(icone):
-        app.setWindowIcon(QIcon(icone))
-
-    # Theme.qml exposé comme singleton sous le module "App" (import App 1.0).
-    qmlRegisterSingletonType(
-        QUrl.fromLocalFile(os.path.join(GUI_DIR, "Theme.qml")),
-        "App", 1, 0, "Theme",
+    import config  # applique les couches de configuration au démarrage
+    logging.basicConfig(
+        level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    from gui_bridge import GuiBridge
+    import app_service
+
+    QApplication.setApplicationName("TCG Stock Bot")
+    QApplication.setOrganizationName("TCGStockBot")
+    app = QApplication(sys.argv)
+    # Fermer la fenêtre ne quitte PAS l'appli : elle se réduit dans le tray.
+    app.setQuitOnLastWindowClosed(False)
+    icone = _charger_icone()
+    app.setWindowIcon(icone)
+
+    qmlRegisterSingletonType(QUrl.fromLocalFile(os.path.join(GUI_DIR, "Theme.qml")),
+                             "App", 1, 0, "Theme")
 
     engine = QQmlApplicationEngine()
     bridge = GuiBridge()
     ctx = engine.rootContext()
     ctx.setContextProperty("bridge", bridge)
-    ctx.setContextProperty("premierLancement", _premier_lancement())
+    ctx.setContextProperty("premierLancement", _premier_lancement(config))
     ctx.setContextProperty("appVersion", "1.0")
 
     engine.load(QUrl.fromLocalFile(os.path.join(GUI_DIR, "Main.qml")))
     if not engine.rootObjects():
         logger.error("Échec du chargement de l'interface QML.")
         return 1
+    fenetre = engine.rootObjects()[0]
 
-    logger.info("Interface lancée. Premier lancement : %s", _premier_lancement())
+    # ---- Icône de la barre des tâches (tray) ------------------------------
+    tray = QSystemTrayIcon(icone, app)
+    tray.setToolTip("TCG Stock Bot")
+    menu = QMenu()
+
+    def afficher():
+        fenetre.show()
+        fenetre.raise_()
+        fenetre.requestActivate()
+
+    act_ouvrir = QAction("Ouvrir", app); act_ouvrir.triggered.connect(afficher)
+    act_demarrer = QAction("Démarrer le bot", app)
+    act_demarrer.triggered.connect(lambda: app_service.demarrer_bot())
+    act_arreter = QAction("Arrêter le bot", app)
+    act_arreter.triggered.connect(lambda: app_service.arreter_bot())
+    act_quitter = QAction("Quitter", app)
+    act_quitter.triggered.connect(app.quit)
+    for a in (act_ouvrir, act_demarrer, act_arreter):
+        menu.addAction(a)
+    menu.addSeparator()
+    menu.addAction(act_quitter)
+    tray.setContextMenu(menu)
+    tray.activated.connect(lambda raison: afficher()
+                           if raison == QSystemTrayIcon.Trigger else None)
+    tray.show()
+
+    # Arrêt propre du bot quand on quitte vraiment l'appli.
+    def au_revoir():
+        logger.info("Fermeture — arrêt du bot…")
+        app_service.arreter_bot()
+    app.aboutToQuit.connect(au_revoir)
+
+    logger.info("Interface lancée. Premier lancement : %s", _premier_lancement(config))
     return app.exec()
 
 

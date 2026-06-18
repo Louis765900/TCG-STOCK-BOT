@@ -1,5 +1,6 @@
 """Configuration centrale de TCG-STOCK-BOT."""
 import os
+import sys
 import json
 import logging
 from dotenv import load_dotenv
@@ -87,7 +88,17 @@ DISCORD_ALERT_ROLE_ID = os.getenv("DISCORD_ALERT_ROLE_ID", "")
 if not DISCORD_WEBHOOK_URL and not (DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID):
     logging.warning("⚠️ Aucun canal Discord configuré (ni webhook, ni bot).")
 
-DB_PATH = os.getenv("DB_PATH", "tcg_stocks.db")
+# Emplacement de la base : variable d'env > dossier de données (app empaquetée)
+# > fichier local (développement). Pour l'app installée, on écrit dans un dossier
+# inscriptible (%APPDATA%) plutôt qu'à côté de l'exe.
+_db_env = os.getenv("DB_PATH")
+if _db_env:
+    DB_PATH = _db_env
+elif getattr(sys, "frozen", False):
+    os.makedirs(dossier_donnees(), exist_ok=True)
+    DB_PATH = os.path.join(dossier_donnees(), "tcg_stocks.db")
+else:
+    DB_PATH = "tcg_stocks.db"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 MIN_SLEEP = int(os.getenv("MIN_SLEEP", "60"))
 MAX_SLEEP = int(os.getenv("MAX_SLEEP", "180"))

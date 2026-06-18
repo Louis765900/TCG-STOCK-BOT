@@ -18,6 +18,10 @@ Window {
     property int pageIndex: 0
     property bool montrerAssistant: premierLancement
 
+    // Fermer la fenêtre la réduit dans la barre des tâches (le bot continue).
+    // Pour quitter pour de bon : menu du tray → « Quitter ».
+    onClosing: function(close) { close.accepted = false; win.hide() }
+
     // ---- Fond arrondi de la fenêtre ----------------------------------------
     Rectangle {
         id: cadre

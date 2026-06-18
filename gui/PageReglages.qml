@@ -20,6 +20,7 @@ Item {
         fDeal.text = r.DEAL_DROP_PERCENT || ""
         fBeat.text = r.HEARTBEAT_INTERVAL || ""
         tMask.checked = ("" + (r.MASQUER_REVENDEURS || "")).toLowerCase() === "true"
+        tAuto.checked = bridge.autostartActif()
     }
     function sauver() {
         bridge.enregistrerReglages({
@@ -89,31 +90,25 @@ Item {
                         Field { id: fDeal; Layout.fillWidth: true; label: "Seuil baisse prix (%)"; placeholder: "15" }
                         Field { id: fBeat; Layout.fillWidth: true; label: "Bilan auto (s, 0=off)"; placeholder: "86400" }
                     }
-                    // Toggle masquer revendeurs
-                    RowLayout {
+                    // Masquer revendeurs
+                    Toggle {
+                        id: tMask
                         Layout.fillWidth: true
-                        spacing: 12
-                        Rectangle {
-                            id: tMask
-                            property bool checked: false
-                            width: 46; height: 26; radius: 13
-                            color: checked ? Theme.accent : Theme.bg3
-                            Behavior on color { ColorAnimation { duration: Theme.anim } }
-                            Rectangle {
-                                width: 20; height: 20; radius: 10; color: Theme.textHi
-                                anchors.verticalCenter: parent.verticalCenter
-                                x: parent.checked ? parent.width - width - 3 : 3
-                                Behavior on x { NumberAnimation { duration: Theme.anim; easing.type: Easing.OutCubic } }
-                            }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: parent.checked = !parent.checked }
-                        }
-                        ColumnLayout {
-                            spacing: 0
-                            Text { text: "Masquer les revendeurs (marketplace)"; color: Theme.text
-                                   font { family: Theme.font; pixelSize: Theme.fsBody } }
-                            Text { text: "N'alerter que sur les vendeurs officiels."; color: Theme.textDim
-                                   font { family: Theme.font; pixelSize: Theme.fsSmall } }
-                        }
+                        titre: "Masquer les revendeurs (marketplace)"
+                        sousTitre: "N'alerter que sur les vendeurs officiels."
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+
+                    // Démarrage automatique avec Windows
+                    Toggle {
+                        id: tAuto
+                        Layout.fillWidth: true
+                        actif: bridge.autostartDisponible()
+                        titre: "Démarrer avec Windows (24h/24)"
+                        sousTitre: actif ? "L'appli se lance toute seule à l'ouverture de session."
+                                         : "Disponible uniquement sous Windows."
+                        onBasculer: function(v) { bridge.definirAutostart(v) }
                     }
                 }
             }

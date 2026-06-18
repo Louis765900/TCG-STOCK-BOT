@@ -121,6 +121,19 @@ class GuiBridge(QObject):
     def couleursEnseignes(self):
         return app_service.couleurs_enseignes()
 
+    # ------------------------------------------------------------ autostart
+    @Slot(result=bool)
+    def autostartDisponible(self):
+        return app_service.autostart_disponible()
+
+    @Slot(result=bool)
+    def autostartActif(self):
+        return app_service.autostart_actif()
+
+    @Slot(bool, result=bool)
+    def definirAutostart(self, actif):
+        return app_service.definir_autostart(actif)
+
     # ------------------------------------------------------------ compositeur
     @Slot("QVariant")
     def envoyerMessage(self, champs):
