@@ -120,10 +120,19 @@ class LeclercScraper(BaseScraper):
         logger.info("[%s] Recherche API %d mots-cles...", self.enseigne, len(config.SEARCH_KEYWORDS))
         sem = asyncio.Semaphore(self.CONCURRENCE_RECHERCHE)
         statuts: list[str] = []
+        # Si Leclerc se met à throttler (429/503), on ARRÊTE le balayage : continuer
+        # à le marteler ne ferait qu'aggraver le bannissement de l'IP (DataDome).
+        # Le bot réessaiera au prochain cycle, et StoreHealth le met en veille 1h
+        # après plusieurs échecs → l'IP récupère.
+        etat = {"blocs": 0, "stop": False}
 
         async def chercher(mot: str) -> list[dict]:
+            if etat["stop"]:
+                return []
             url = API_URL.format(q=quote_plus(mot))
             async with sem:
+                if etat["stop"]:
+                    return []
                 data, statut, blocage = await http_get_json(url, timeout_ms=config.REQUEST_TIMEOUT_MS)
                 # Petite pause pour rester sous le radar du limiteur de débit.
                 await asyncio.sleep(random.uniform(*self.DELAI_ENTRE_REQUETES))
@@ -131,6 +140,12 @@ class LeclercScraper(BaseScraper):
             if statut != "ok" or not isinstance(data, dict):
                 if blocage:
                     logger.warning("[%s] '%s' bloque/echec (%s).", self.enseigne, mot, blocage)
+                if statut == "blocked":
+                    etat["blocs"] += 1
+                    if etat["blocs"] >= 2 and not etat["stop"]:
+                        etat["stop"] = True
+                        logger.warning("[%s] Throttling detecte — arret du balayage "
+                                       "(reprise au prochain cycle).", self.enseigne)
                 return []
             produits = []
             for item in data.get("items", []):
