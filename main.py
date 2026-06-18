@@ -13,7 +13,7 @@ from discord_webhook import envoyer_alerte, envoyer_message
 from stock_state import evaluer_transition, RESTOCK, RUPTURE
 from store_health import StoreHealth
 from cycle_report import CycleReport, StoreReport
-from product_format import STORE_COLORS, parse_price
+from product_format import STORE_COLORS, parse_price, est_revendeur
 from price_chart import generer_graphique_prix
 
 from scrapers.cultura import CulturaScraper
@@ -56,6 +56,12 @@ async def _alerter(prod: dict, enseigne: str, type_alerte: str):
     """
     if bot_state.alertes_en_pause():
         logger.info("Alertes en pause (/pause) — '%s' ignoré.", prod.get("titre", ""))
+        return
+
+    # Masquage optionnel des revendeurs tiers (marketplace) si activé dans .env.
+    if config.MASQUER_REVENDEURS and est_revendeur(enseigne, prod.get("seller", "")):
+        logger.info("Revendeur masqué [%s]: %s (vendeur: %s)",
+                    enseigne, prod.get("titre", ""), prod.get("seller", "?"))
         return
 
     url = prod.get("url", "")

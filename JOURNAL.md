@@ -758,3 +758,68 @@ site. Pas une priorité.
 **5 sources solides** : Auchan, Leclerc, LudiJeux, RelicTCG, CoinBarons. Et le petit
 **testeur de boutique** (`tools/tester_boutique.py`) pour ajouter soi-même toute
 nouvelle boutique Shopify/WooCommerce en 1 ligne.
+
+---
+
+## 🏷️ Chantier 20 — Vendeurs officiels vs revendeurs
+
+**Date :** 18 juin 2026 (demande de Tom)
+
+### Le besoin
+Sur les grandes enseignes (Leclerc, Auchan), des **revendeurs tiers** (marketplace)
+vendent aussi — parfois plus cher ou douteux. Tom veut pouvoir **les repérer** ou
+**les masquer**.
+
+### La solution
+- **Pastille automatique** sur chaque alerte :
+  - **✅ Vendeur officiel** (l'enseigne elle-même, ou une boutique spécialisée),
+  - **🔁 Revendeur (marketplace)** (un vendeur tiers sur Leclerc/Auchan).
+- **Paramètre `MASQUER_REVENDEURS`** dans `.env` : à `true`, les revendeurs ne
+  déclenchent plus d'alerte du tout (on ne garde que les officiels).
+
+Les boutiques spécialisées (LudiJeux, RelicTCG, CoinBarons) sont toujours
+considérées « officielles » (vendeur unique). Pour Leclerc/Auchan, « officiel » =
+le vendeur est l'enseigne elle-même (sinon = revendeur).
+
+---
+
+## 🃏 Chantier 21 — Lien Cardmarket
+
+**Date :** 18 juin 2026 (demande de Tom)
+
+### Le besoin
+Comme les liens Google/eBay, ajouter un lien **Cardmarket** pour voir la fiche d'un
+produit (rareté, tendance des prix, moyennes 7/30 jours).
+
+### La solution
+- Nouveau lien/bouton **Cardmarket** sur chaque alerte, qui tombe sur la **recherche
+  du bon jeu** (Pokémon ou One Piece, détecté automatiquement depuis le titre).
+- Boutons d'une alerte : 🛒 Acheter · Google · eBay · **Cardmarket** · ⚡ Autobuy.
+
+### Limite honnête (à savoir)
+Afficher les **prix Cardmarket directement dans l'embed** Discord n'est PAS faisable
+gratuitement : Cardmarket est protégé (Cloudflare bloque le scraping) et son API
+demande une **clé d'application à valider**. Le lien, lui, ouvre la page où ces
+infos sont visibles. Si Tom veut les prix DANS l'alerte, il faudra demander la clé
+API Cardmarket — intégrable ensuite.
+
+---
+
+## 📈 Chantier 22 — Un graphique sur TOUS les produits
+
+**Date :** 18 juin 2026 (demande de Tom)
+
+### Le problème
+Certaines alertes n'avaient pas de graphique de prix. Cause : le graphe n'était
+tracé qu'à partir de **2 relevés**. Or une **nouveauté** n'a qu'**un seul** relevé
+au moment de l'alerte → pas de graphe.
+
+### La correction
+Le graphique se génère maintenant **dès 1 relevé** : on trace une **ligne plate**
+avec le prix affiché (« premier relevé »), et la courbe se remplit naturellement au
+fil des cycles. Résultat : un graphe sur **chaque alerte, chaque enseigne**.
+On a aussi donné une **couleur propre** aux 3 boutiques (LudiJeux, RelicTCG,
+CoinBarons) pour des graphes cohérents.
+
+Un graphe n'est omis que s'il n'y a **aucun prix numérique** (cas quasi inexistant
+sur nos 5 sources) ou si matplotlib est absent.

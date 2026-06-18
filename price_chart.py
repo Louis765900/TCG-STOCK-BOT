@@ -1,7 +1,7 @@
 """Génération d'un graphique d'historique de prix (PNG en mémoire)."""
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +20,25 @@ def generer_graphique_prix(historique: list[dict], titre: str, couleur: int = 0x
     """
     Construit un PNG de l'évolution du prix.
     `historique`: liste de dicts {prix_value, en_stock, timestamp} triée du plus ancien au plus récent.
-    Retourne les octets PNG, ou None si impossible (matplotlib absent, < 2 points).
+    Retourne les octets PNG, ou None seulement si matplotlib est absent ou s'il n'y a
+    AUCUN relevé de prix numérique. Avec un seul relevé, on trace une ligne plate
+    (nouveauté) pour qu'un graphique apparaisse quand même sur tous les produits.
     """
     if not _MATPLOTLIB_OK:
         logger.debug("matplotlib indisponible — graphique ignoré.")
         return None
 
     points = [h for h in historique if h.get("prix_value")]
-    if len(points) < 2:
+    if not points:
         return None
 
     dates = [datetime.fromtimestamp(h["timestamp"]) for h in points]
     prix = [float(h["prix_value"]) for h in points]
+    # Un seul relevé (produit tout juste découvert) : on duplique le point pour
+    # tracer une ligne plate lisible plutôt que rien.
+    if len(points) == 1:
+        dates = [dates[0] - timedelta(hours=1), dates[0]]
+        prix = [prix[0], prix[0]]
     hex_couleur = f"#{couleur:06x}"
 
     fig, ax = plt.subplots(figsize=(6.0, 3.0), dpi=110)
@@ -42,7 +49,7 @@ def generer_graphique_prix(historique: list[dict], titre: str, couleur: int = 0x
             markersize=4, markerfacecolor=hex_couleur)
     ax.fill_between(dates, prix, min(prix), color=hex_couleur, alpha=0.12)
 
-    # Met en évidence min / max
+    # Met en évidence min / max (ou le prix actuel si la ligne est plate)
     pmin, pmax = min(prix), max(prix)
     if pmax != pmin:
         i_min, i_max = prix.index(pmin), prix.index(pmax)
@@ -50,6 +57,12 @@ def generer_graphique_prix(historique: list[dict], titre: str, couleur: int = 0x
                     fontsize=8, xytext=(0, -12), textcoords="offset points", ha="center")
         ax.annotate(f"{pmax:.2f}€", (dates[i_max], pmax), color="#f04747",
                     fontsize=8, xytext=(0, 6), textcoords="offset points", ha="center")
+    else:
+        # Ligne plate : on affiche le prix et on force une échelle Y lisible.
+        ax.annotate(f"{prix[-1]:.2f}€", (dates[-1], prix[-1]), color="#ffffff",
+                    fontsize=9, xytext=(0, 8), textcoords="offset points", ha="center")
+        marge = max(pmax * 0.1, 1.0)
+        ax.set_ylim(pmax - marge, pmax + marge)
 
     titre_court = (titre[:42] + "…") if len(titre) > 43 else titre
     ax.set_title(f"Évolution du prix — {titre_court}", color="#ffffff", fontsize=10, pad=10)

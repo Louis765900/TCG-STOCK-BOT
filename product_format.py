@@ -22,6 +22,9 @@ STORE_LABELS = {
     "KingJouet": "King Jouet",
     "Leclerc": "E.Leclerc",
     "Smyths": "Smyths Toys",
+    "LudiJeux": "LudiJeux",
+    "RelicTCG": "Relic TCG",
+    "CoinBarons": "Le Coin des Barons",
 }
 
 STORE_COLORS = {
@@ -32,7 +35,41 @@ STORE_COLORS = {
     "KingJouet": 0xE30613,
     "Leclerc": 0x0066CC,
     "Smyths": 0x009FE3,
+    "LudiJeux": 0x2ECC71,
+    "RelicTCG": 0x9B59B6,
+    "CoinBarons": 0xE67E22,
 }
+
+# Vendeurs "directs" (l'enseigne elle-même) sur les places de marché. Tout autre
+# vendeur y est un revendeur tiers (marketplace). Les boutiques spécialisées
+# (LudiJeux, RelicTCG, CoinBarons…) sont un vendeur unique => considéré officiel.
+VENDEURS_DIRECTS = {
+    "Leclerc": {"e.leclerc", "leclerc", "e leclerc", "espace culturel leclerc",
+                "espace culturel e.leclerc", "leclerc.com"},
+    "Auchan": {"auchan", "auchan.fr", "auchan retail france", "auchan direct"},
+}
+
+
+def est_vendeur_officiel(store: str, seller: str) -> bool:
+    """True si le produit est vendu par l'enseigne elle-même (pas un revendeur tiers)."""
+    directs = VENDEURS_DIRECTS.get(store)
+    if directs is None:
+        return True  # boutique spécialisée : vendeur unique, considéré officiel
+    s = clean_text(seller).lower()
+    return (not s) or (s in directs)
+
+
+def est_revendeur(store: str, seller: str) -> bool:
+    """True si c'est un revendeur tiers (marketplace) sur une grande enseigne."""
+    return not est_vendeur_officiel(store, seller)
+
+
+def seller_badge(store: str, seller: str) -> str:
+    """Libellé vendeur avec pastille : ✅ officiel / 🔁 revendeur (marketplace)."""
+    s = clean_text(seller)
+    if est_vendeur_officiel(store, seller):
+        return f"✅ {s or 'Vendeur officiel'}"
+    return f"🔁 {s or 'Marketplace'} (revendeur)"
 
 
 def normalize_product(prod: dict, enseigne: str) -> dict:
@@ -139,12 +176,24 @@ def parse_price(value: str) -> Decimal | None:
         return None
 
 
+def cardmarket_link(title: str) -> str:
+    """Lien de recherche Cardmarket vers le bon jeu (Pokémon ou One Piece).
+
+    Cardmarket n'indexe pas l'EAN : on cherche par le nom du produit. Le lien tombe
+    sur la fiche où l'on voit rareté, tendance des prix et moyennes 7/30 jours.
+    """
+    jeu = "OnePiece" if "one piece" in (title or "").lower() else "Pokemon"
+    return (f"https://www.cardmarket.com/fr/{jeu}/Products/Search"
+            f"?searchString={quote_plus(title or '')}")
+
+
 def ean_search_links(ean: str, fallback_title: str) -> dict[str, str]:
     query = ean or fallback_title
     encoded = quote_plus(query)
     return {
         "Google": f"https://www.google.com/search?q={encoded}",
         "eBay": f"https://www.ebay.fr/sch/i.html?_nkw={encoded}",
+        "Cardmarket": cardmarket_link(fallback_title),
     }
 
 

@@ -60,6 +60,12 @@ STORE_PAUSE_DURATION = int(os.getenv("STORE_PAUSE_DURATION", "3600"))
 # un produit deja en stock. Defaut 15%. Mettre 0 pour desactiver les alertes deal.
 DEAL_DROP_PERCENT = int(os.getenv("DEAL_DROP_PERCENT", "15"))
 
+# Masquer les revendeurs tiers (marketplace) sur les grandes enseignes (Leclerc,
+# Auchan) : si True, seuls les produits vendus par l'enseigne elle-même ou par les
+# boutiques spécialisées génèrent une alerte. False = on alerte sur tout, mais une
+# pastille ✅/🔁 indique le type de vendeur dans l'alerte.
+MASQUER_REVENDEURS = os.getenv("MASQUER_REVENDEURS", "false").lower() in {"1", "true", "yes", "on"}
+
 # Retention de l'historique de prix (jours). Au-dela, les points sont purges au
 # demarrage pour garder la base legere.
 HISTORY_RETENTION_DAYS = int(os.getenv("HISTORY_RETENTION_DAYS", "90"))

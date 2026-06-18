@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from product_format import (
     normalize_product, clean_price, clean_ean, compute_discount, format_stock,
+    est_vendeur_officiel, est_revendeur, seller_badge, cardmarket_link, ean_search_links,
 )
 
 
@@ -35,6 +36,19 @@ def test():
     assert format_stock({"in_stock": False}) == "Indisponible"
     assert format_stock({"in_stock": True, "stock_quantity": 3}) == "Disponible - 3 restant(s)"
     assert format_stock({"in_stock": True, "stock_quantity": None}) == "Disponible"
+
+    # Vendeur officiel vs revendeur (Chantier 20)
+    assert est_vendeur_officiel("Leclerc", "E.Leclerc") is True
+    assert est_vendeur_officiel("Leclerc", "") is True          # pas de marketplace = direct
+    assert est_revendeur("Leclerc", "1001 Jouets") is True      # tiers = revendeur
+    assert est_vendeur_officiel("LudiJeux", "") is True         # boutique = officiel
+    assert seller_badge("Leclerc", "1001 Jouets").startswith("🔁")
+    assert seller_badge("LudiJeux", "").startswith("✅")
+
+    # Lien Cardmarket : bon jeu + présent dans les liens de recherche (Chantier 21)
+    assert "/Pokemon/Products/Search" in cardmarket_link("ETB Pokémon Flammes Obsidiennes")
+    assert "/OnePiece/Products/Search" in cardmarket_link("Display One Piece OP05")
+    assert "Cardmarket" in ean_search_links("123", "Display One Piece OP05")
 
 
 if __name__ == "__main__":

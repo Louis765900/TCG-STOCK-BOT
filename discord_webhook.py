@@ -13,6 +13,7 @@ from product_format import (
     format_stock,
     markdown_links,
     normalize_product,
+    seller_badge,
 )
 
 logger = logging.getLogger(__name__)
@@ -185,8 +186,9 @@ def build_alert_embed(produit: dict, enseigne: str, type_alerte: str,
     # Champs enrichis affiches seulement s'ils sont renseignes.
     if product.get("brand"):
         fields.append({"name": "Marque", "value": product["brand"], "inline": True})
-    if product.get("seller"):
-        fields.append({"name": "Vendeur", "value": product["seller"], "inline": True})
+    fields.append({"name": "Vendeur",
+                   "value": seller_badge(product["store"], product.get("seller", "")),
+                   "inline": True})
     fields += [
         {"name": "EAN", "value": ean_value, "inline": False},
         {"name": "Recherche", "value": markdown_links(search_links), "inline": False},
