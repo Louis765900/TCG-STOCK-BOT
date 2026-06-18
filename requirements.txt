@@ -8,3 +8,5 @@ aiofiles
 matplotlib
 discord.py>=2.3
 PySide6
+curl_cffi
+playwright-stealth

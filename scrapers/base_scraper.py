@@ -17,6 +17,24 @@ from http_fetch import http_get
 
 logger = logging.getLogger(__name__)
 
+# Furtivité navigateur (optionnelle) : masque les signaux "robot"
+# (navigator.webdriver, etc.) pour franchir les protections JS (DataDome…).
+try:
+    from playwright_stealth import Stealth
+    _STEALTH = Stealth()
+except Exception:  # pragma: no cover - lib absente
+    _STEALTH = None
+
+
+async def _appliquer_furtivite(page) -> None:
+    """Applique playwright-stealth à une page, sans planter si indisponible."""
+    if _STEALTH is None:
+        return
+    try:
+        await _STEALTH.apply_stealth_async(page)
+    except Exception as e:
+        logger.debug("playwright-stealth non appliqué: %s", e)
+
 # Surchargeable via .env
 MAX_RETRIES = int(config.__dict__.get("ANTIBOT_MAX_RETRIES", 3))
 
@@ -248,6 +266,7 @@ class BaseScraper(ABC):
             user_agent=anti_bot_bypass.choisir_user_agent()
         )
         page_virtuelle = await context.new_page()
+        await _appliquer_furtivite(page_virtuelle)
 
         try:
             yield page_virtuelle, BeautifulSoup(html, "html.parser")

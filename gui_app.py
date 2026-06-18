@@ -78,9 +78,35 @@ def _selftest() -> int:
     return 0
 
 
+def _diag_net() -> int:
+    """Vérifie que la couche réseau marche dans l'app empaquetée (curl_cffi inclus).
+
+    Récupère l'API Leclerc (protégée par DataDome) : si ça répond OK, c'est que
+    curl_cffi est bien embarqué et opérationnel dans l'exe.
+    """
+    import asyncio
+    import http_fetch
+    from http_fetch import http_get_json
+    print("curl_cffi actif :", http_fetch._CURL_OK)
+    url = ("https://www.e.leclerc/api/rest/live-api/product-search"
+           "?text=pokemon%20booster")
+
+    async def run():
+        data, statut, blocage = await http_get_json(url)
+        n = len(data.get("items", [])) if isinstance(data, dict) else 0
+        print(f"Leclerc -> statut={statut} items={n} blocage={blocage}")
+        return statut == "ok" and n > 0
+
+    ok = asyncio.run(run())
+    print("DIAG-NET OK" if ok else "DIAG-NET ECHEC")
+    return 0 if ok else 1
+
+
 def main() -> int:
     if "--selftest" in sys.argv:
         return _selftest()
+    if "--diag-net" in sys.argv:
+        return _diag_net()
 
     import config  # applique les couches de configuration au démarrage
     logging.basicConfig(
