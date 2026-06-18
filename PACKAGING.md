@@ -51,3 +51,14 @@ Envoie-lui **`Output\TCGStockBot-Setup.exe`**. Il double-clique :
   HTTP/JSON). L'appli tourne en **mode léger**.
 - **Mettre à jour** : reconstruis et renvoie le nouveau Setup ; il s'installe par-dessus.
 - **Vérifier un build** sans interface : `dist\TCGStockBot\TCGStockBot.exe --selftest`.
+
+## ✅ Checklist de livraison (avant d'envoyer à Tom)
+- [ ] **Réinitialiser le jeton Discord** (un nouveau, l'ancien a été exposé) si on
+      utilise le mode bot.
+- [ ] *(option)* `bundled_settings.json` rempli avec le webhook → app pré-configurée.
+- [ ] `powershell -ExecutionPolicy Bypass -File build.ps1` → **selftest OK**.
+- [ ] Tester `Output\TCGStockBot-Setup.exe` sur une **session Windows propre** :
+      installe, lance, clique **Démarrer**, vérifier qu'une **alerte arrive** sur Discord.
+- [ ] Vérifier que **fermer la fenêtre** la réduit dans le tray (le bot continue).
+- [ ] *(option)* cocher **« Démarrer avec Windows »** et redémarrer pour confirmer le 24h/24.
+- [ ] Joindre **`GUIDE_TOM.md`** (mode d'emploi non-technique) à la livraison.

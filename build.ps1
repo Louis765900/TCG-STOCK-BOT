@@ -29,7 +29,8 @@ Write-Host "[3/3] Installateur Inno Setup…" -ForegroundColor Cyan
 $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
 if (-not $iscc) {
     foreach ($p in @("C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-                     "C:\Program Files\Inno Setup 6\ISCC.exe")) {
+                     "C:\Program Files\Inno Setup 6\ISCC.exe",
+                     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe")) {
         if (Test-Path $p) { $iscc = $p; break }
     }
 }

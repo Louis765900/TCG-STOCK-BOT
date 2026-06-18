@@ -984,3 +984,40 @@ fabriquer l'installateur.
 ### Vérifs
 Tests **11/11**. Selftest **OK** (en dev). Build PyInstaller lancé et installateur
 prêt à compiler (voir `PACKAGING.md`).
+
+---
+
+## 🚀 Chantier E — Le build final + test « comme chez Tom » + livraison
+
+**Date :** 18 juin 2026
+
+Cinquième brique : **fabriquer pour de vrai** le logiciel livrable et le **tester de
+bout en bout**, comme si on était sur la machine de Tom.
+
+### Ce que j'ai fait, en vrai (pas juste préparé)
+1. **Installé Inno Setup** (l'outil qui fabrique l'installateur).
+2. **Construit l'application** avec PyInstaller → `dist\TCGStockBot\TCGStockBot.exe`
+   (l'exe fait 21 Mo, le dossier complet **584 Mo** — on garde **toutes** les
+   fonctionnalités, c'était la consigne).
+3. **Fabriqué l'installateur** → **`Output\TCGStockBot-Setup.exe` = 123 Mo**
+   (le gros dossier est compressé dans un seul fichier à double-cliquer).
+4. **Testé comme chez Tom** : j'ai **installé l'app depuis le Setup** (en silencieux),
+   puis **lancé l'app installée** → elle **charge l'interface sans erreur** (selftest
+   OK). Enfin j'ai **désinstallé** proprement. Toute la chaîne marche.
+
+### Les documents de livraison
+- **`GUIDE_TOM.md`** : mode d'emploi **simple et non-technique** pour Tom (installer,
+  les 6 écrans, le fonctionnement 24h/24, les questions fréquentes).
+- **`PACKAGING.md`** : pour toi, comment refaire un build + une **checklist de
+  livraison** (réinitialiser le jeton, tester sur session propre, joindre le guide…).
+
+### Il reste juste, côté toi, avant d'envoyer à Tom
+- **Réinitialiser le jeton Discord** (l'ancien a été montré en clair) si tu utilises
+  le mode bot.
+- *(option)* remplir `bundled_settings.json` avec ton webhook pour que Tom reçoive
+  l'app **déjà configurée**, puis refaire un `build.ps1`.
+- Envoyer **`TCGStockBot-Setup.exe`** + **`GUIDE_TOM.md`**. 🎉
+
+### Vérifs
+Tests **11/11**. Build PyInstaller **OK**. Installateur **compilé (123 Mo)**.
+**Installation depuis le Setup testée + app installée lancée = OK.** Désinstallation OK.
