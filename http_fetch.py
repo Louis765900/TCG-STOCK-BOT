@@ -96,7 +96,7 @@ async def http_get(url: str, *, timeout_ms: int = 30000) -> tuple[Optional[str],
         async with aiohttp.ClientSession(timeout=timeout, headers=_headers()) as session:
             status, html = await _get_avec_backoff(session, url)
             if status in _CODES_BLOQUES:
-                return None, "blocked", f"http_{status}"
+                return await _secours_html(url, f"http_{status}")
             if status >= 400 or html is None:
                 return None, "timeout", f"http_{status}"
     except asyncio.TimeoutError:
@@ -106,13 +106,23 @@ async def http_get(url: str, *, timeout_ms: int = 30000) -> tuple[Optional[str],
         return None, "timeout", "network_error"
 
     if not html or len(html) < 200:
-        return None, "blocked", "empty"
+        return await _secours_html(url, "empty")
 
     blocage = detecter_type_blocage(html)
     if blocage:
-        return None, "blocked", blocage
+        return await _secours_html(url, blocage)
 
     return html, "ok", None
+
+
+async def _secours_html(url: str, blocage: str):
+    """Dernier recours : tente via un proxy anti-bot, sinon renvoie 'blocked'."""
+    from proxy_fetch import fetch_via_proxy, disponible
+    if disponible():
+        texte = await fetch_via_proxy(url)
+        if texte and len(texte) >= 200 and not detecter_type_blocage(texte):
+            return texte, "ok", None
+    return None, "blocked", blocage
 
 
 async def http_get_json(url: str, *, timeout_ms: int = 30000,
@@ -131,7 +141,7 @@ async def http_get_json(url: str, *, timeout_ms: int = 30000,
         async with aiohttp.ClientSession(timeout=timeout, headers=h) as session:
             status, texte = await _get_avec_backoff(session, url)
             if status in _CODES_BLOQUES:
-                return None, "blocked", f"http_{status}"
+                return await _secours_json(url, f"http_{status}")
             if status >= 400 or texte is None:
                 return None, "timeout", f"http_{status}"
     except asyncio.TimeoutError:
@@ -144,4 +154,17 @@ async def http_get_json(url: str, *, timeout_ms: int = 30000,
         return _json.loads(texte), "ok", None
     except (ValueError, TypeError):
         # Pas du JSON => probablement une page de challenge anti-bot.
-        return None, "blocked", "not_json"
+        return await _secours_json(url, "not_json")
+
+
+async def _secours_json(url: str, blocage: str):
+    """Dernier recours JSON : tente via un proxy anti-bot puis parse le JSON."""
+    from proxy_fetch import fetch_via_proxy, disponible
+    if disponible():
+        texte = await fetch_via_proxy(url)
+        if texte:
+            try:
+                return _json.loads(texte), "ok", None
+            except (ValueError, TypeError):
+                pass
+    return None, "blocked", blocage

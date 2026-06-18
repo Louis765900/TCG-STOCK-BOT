@@ -160,6 +160,22 @@ ANTIBOT_WARMUP = os.getenv("ANTIBOT_WARMUP", "true").lower() in {"1", "true", "y
 # Pool de proxies (format JSON array: '["http://user:pass@host:port", ...]')
 PROXY_LIST = os.getenv("PROXY_LIST", "")
 
+# -----------------------------------------------------------
+# Filet de secours "scraping API" (ScrapingBee / ZenRows / Crawlbase)
+# -----------------------------------------------------------
+# Utilisé UNIQUEMENT en dernier recours, quand une requête HTTP directe est
+# bloquée (ex. DataDome sur Leclerc). On essaie les fournisseurs configurés EN
+# CASCADE (le 1er qui répond gagne) → on cumule les quotas gratuits et on bascule
+# automatiquement si l'un échoue. Vide = désactivé (comportement 100% gratuit).
+SCRAPINGBEE_KEY = os.getenv("SCRAPINGBEE_KEY", "")
+ZENROWS_KEY = os.getenv("ZENROWS_KEY", "")
+CRAWLBASE_TOKEN = os.getenv("CRAWLBASE_TOKEN", "")
+# Activer le secours par proxy payant (par défaut: actif si au moins une clé existe).
+PROXY_FALLBACK = os.getenv(
+    "PROXY_FALLBACK",
+    "true" if (SCRAPINGBEE_KEY or ZENROWS_KEY or CRAWLBASE_TOKEN) else "false"
+).lower() in {"1", "true", "yes", "on"}
+
 # Mots-clés recherchés sur CHAQUE enseigne (découverte de produits variés).
 # Surchargeable via .env : SEARCH_KEYWORDS="cartes pokemon,coffret pokemon,..."
 # Ajoute ici les noms de sets récents pour suivre les dernières sorties
