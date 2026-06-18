@@ -855,3 +855,41 @@ maintenant un `stop_event` et un **sommeil interruptible** (arrêt immédiat).
 Tests **10/10** (nouveau `test_app_core.py`), compilation OK, et smoke-test réel du
 mode léger (un cycle Leclerc sans navigateur ni Discord). Le `main.py` en CLI est
 **inchangé**.
+
+---
+
+## 🔌 Chantier B — Le « pont » entre le bot et la future fenêtre
+
+**Date :** 18 juin 2026
+
+Deuxième brique. **Objectif : construire la prise** sur laquelle viendra se brancher
+la jolie fenêtre (Chantier C). Imagine une multiprise : d'un côté le moteur du bot,
+de l'autre les boutons de l'écran. Le pont, c'est la multiprise au milieu.
+
+### 1) Une couche « service » (`app_service.py`)
+C'est le cerveau qui sait **tout faire** sans avoir besoin d'écran :
+- **démarrer / arrêter** le bot et lire son **statut** (en direct),
+- lister la **watchlist** (les produits surveillés) et en **supprimer** un,
+- **lire et enregistrer les réglages** (jeton Discord, enseignes, vitesse…),
+- **envoyer un message** Discord écrit à la main (le « compositeur »),
+- garder en mémoire les **dernières lignes de logs** (ce que fait le bot).
+
+Tout ce qui est lent (base de données, envoi Discord) tourne sur **sa propre petite
+boucle dans un thread à part**, séparée de celle du bot → **aucun blocage, aucun
+conflit**.
+
+### 2) Le pont Qt (`gui_bridge.py`)
+C'est la prise que la fenêtre QML branchera. Elle **n'a aucune intelligence** : elle
+ne fait que transmettre au service et **prévenir l'écran** quand quelque chose change
+(nouveau statut chaque seconde, nouvelle ligne de log, watchlist mise à jour, message
+envoyé…). Les actions longues (arrêt, requêtes, envoi) tournent en arrière-plan pour
+que **la fenêtre ne gèle jamais**.
+
+### 3) Envoi de message « propre » (`poster_embed`)
+Petit ajout dans `discord_webhook.py` : un envoi ponctuel **autonome**, qui ne se
+bat pas avec le bot pour le même verrou. C'est ce qu'utilise le compositeur de l'IHM.
+
+### Vérifs
+Tests **11/11** (nouveau `test_gui_bridge.py` : couleurs, réglages, watchlist sur une
+base temporaire, capture des logs, envoi composé simulé, et un **vrai test du pont Qt**
+qui démarre une mini-appli Qt et vérifie qu'un log arrive bien à l'écran).

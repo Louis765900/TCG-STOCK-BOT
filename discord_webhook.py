@@ -140,6 +140,32 @@ async def envoyer_message(embed: dict):
     await _envoyer({"embeds": [embed]})
 
 
+async def poster_embed(embed: dict, content: str = "") -> bool:
+    """
+    Envoi ponctuel et autonome d'un embed (utilisé par le compositeur de l'IHM).
+
+    Contrairement à `_envoyer`, n'utilise PAS le verrou de throttle partagé : il est
+    sûr de l'appeler depuis une autre boucle asyncio que celle du bot. Faible
+    fréquence (envoi manuel) → pas de risque de 429. Retourne True si livré.
+    """
+    if not (_mode_bot() or DISCORD_WEBHOOK_URL):
+        logger.warning("Envoi impossible : aucun canal Discord configuré.")
+        return False
+    payload = {"embeds": [embed]}
+    if content:
+        payload["content"] = content
+    try:
+        async with aiohttp.ClientSession() as session:
+            if _mode_bot():
+                url = f"{DISCORD_API}/channels/{DISCORD_CHANNEL_ID}/messages"
+                headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
+                return await _post_avec_retry(session, url, headers=headers, json=payload)
+            return await _post_avec_retry(session, DISCORD_WEBHOOK_URL, json=payload)
+    except Exception as e:
+        logger.error("Exception envoi embed: %s", e)
+        return False
+
+
 async def _envoyer(payload: dict, chart_png: bytes | None = None):
     """Coeur d'envoi : throttle anti-429 + choix du transport (bot/webhook)."""
     if not (_mode_bot() or DISCORD_WEBHOOK_URL):
