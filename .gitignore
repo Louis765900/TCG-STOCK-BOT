@@ -47,3 +47,6 @@ Thumbs.db
 
 # Captures de l'interface (artefacts de dev)
 tools/apercu.png
+
+# Marqueur d'installation des dependances (cree par lancer_bot.bat)
+.deps_ok
