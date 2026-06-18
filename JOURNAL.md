@@ -823,3 +823,35 @@ CoinBarons) pour des graphes cohérents.
 
 Un graphe n'est omis que s'il n'y a **aucun prix numérique** (cas quasi inexistant
 sur nos 5 sources) ou si matplotlib est absent.
+
+---
+
+## 🧱 Chantier A — Préparer le cœur pour l'appli (vers le .exe)
+
+**Date :** 18 juin 2026
+
+Première brique de l'appli graphique. **Objectif : préparer le moteur sans rien
+casser** (le bot en ligne de commande marche toujours pareil).
+
+### 1) Navigateur (Playwright) désormais OPTIONNEL
+Nos 5 sources par défaut sont en HTTP/JSON → **elles n'ont pas besoin du navigateur**.
+Le bot ne lance Playwright **que si** une enseigne « blindée » est activée. Par défaut :
+**mode léger, aucun navigateur** → appli beaucoup plus simple à empaqueter et plus
+rapide. (Vérifié en réel : « Mode léger : pas de navigateur lancé ».)
+
+### 2) Configuration en couches
+Les réglages se chargent dans l'ordre : `.env` (dev) → **réglages pré-remplis
+embarqués** (pour la machine de Tom : zéro config) → **réglages utilisateur**
+(`%APPDATA%\TCGStockBot\settings.json`, écrits par l'assistant). Nouvelle fonction
+`sauver_reglages_utilisateur()` pour l'assistant de 1ʳᵉ config.
+
+### 3) Bot pilotable (start/stop/statut)
+Nouveau `bot_controller.py` : démarre/arrête la boucle dans un **thread** (l'IHM
+reste fluide), arrêt **propre** via un signal, et **statut live** (cycle en cours,
+produits surveillés, état des enseignes) exposé via `bot_state`. La boucle accepte
+maintenant un `stop_event` et un **sommeil interruptible** (arrêt immédiat).
+
+### Vérifs
+Tests **10/10** (nouveau `test_app_core.py`), compilation OK, et smoke-test réel du
+mode léger (un cycle Leclerc sans navigateur ni Discord). Le `main.py` en CLI est
+**inchangé**.

@@ -32,6 +32,8 @@ _MAX_PAGES = 3  # borne : jusqu'à 300 produits par terme
 
 class WooCommerceScraper(BaseScraper):
 
+    utilise_navigateur = False  # Store API publique, aucun navigateur requis
+
     def __init__(self, enseigne: str, domaine: str, browser):
         super().__init__(enseigne, browser)
         self.domaine = domaine

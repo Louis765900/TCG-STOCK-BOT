@@ -35,6 +35,12 @@ class BaseScraper(ABC):
     # (Cultura, King Jouet, Smyths, Leclerc) gardent False -> navigateur direct.
     http_first: bool = False
 
+    # True si l'enseigne a BESOIN du navigateur Playwright pour fonctionner (sites
+    # blindes). Les enseignes en API JSON (Leclerc, Shopify, WooCommerce) ou en
+    # HTTP simple (Auchan) le mettent a False : le bot peut alors tourner SANS
+    # navigateur (mode leger, ideal pour l'appli packagee). Voir main.py.
+    utilise_navigateur: bool = True
+
     def __init__(self, enseigne: str, browser: Browser):
         self.enseigne = enseigne
         self.browser = browser
@@ -53,8 +59,16 @@ class BaseScraper(ABC):
             html, statut, blocage = await http_get(url, timeout_ms=config.REQUEST_TIMEOUT_MS)
             if statut == "ok":
                 return html, "ok", None
+            if self.browser is None:
+                # Mode leger sans navigateur : pas de repli possible, on s'arrete la.
+                return None, statut, blocage
             logger.debug("[%s] HTTP insuffisant (%s) -> navigateur: %s",
                          self.enseigne, blocage, url.split("?")[0])
+
+        if self.browser is None:
+            # Enseigne navigateur mais aucun navigateur dispo (ne devrait pas arriver
+            # car on ne l'active pas dans ce mode) : echec propre.
+            return None, "blocked", "navigateur_indisponible"
 
         return await anti_bot_bypass.fetch_with_bypass(
             self.browser,

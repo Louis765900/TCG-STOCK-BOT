@@ -387,7 +387,24 @@ async def _envoyer_heartbeat(restocks: int, nouveautes: int, cycles: int, dernie
 # ----------------------------------------------------------------------------
 # Boucle principale
 # ----------------------------------------------------------------------------
-async def main_loop():
+async def _dormir(duree: float, stop_event):
+    """Sommeil interruptible : se réveille immédiatement si l'arrêt est demandé."""
+    if stop_event is None:
+        await asyncio.sleep(duree)
+        return
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=duree)
+    except asyncio.TimeoutError:
+        pass
+
+
+async def main_loop(stop_event=None):
+    """Boucle principale.
+
+    `stop_event` (asyncio.Event, optionnel) : si fourni, l'appli/IHM peut demander
+    un arrêt propre en le déclenchant — la boucle sort et libère les ressources.
+    Sans argument, comportement CLI inchangé (tourne jusqu'à Ctrl+C / RUN_ONCE).
+    """
     filtre = "Gemini + local" if config.USE_GEMINI_FILTER else "local"
     logger.info(
         "Démarrage TCG-STOCK-BOT (filtre: %s, recherche toutes les %d cycles, "
@@ -413,89 +430,134 @@ async def main_loop():
             logger.warning("discord.py non installé — mode bot ignoré "
                            "(pip install discord.py).")
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+    # Scrapers construits SANS navigateur d'abord ; on ne lance Playwright que si une
+    # enseigne activée en a réellement besoin (sites blindés). Les 5 sources par
+    # défaut sont en HTTP/JSON → aucun navigateur (mode léger, idéal appli packagée).
+    tous_scrapers = {
+        "Cultura": CulturaScraper(None),
+        "Leclerc": LeclercScraper(None),
+        "KingJouet": KingJouetScraper(None),
+        "Smyths": SmythsScraper(None),
+        "GrandeRecre": GrandeRecreScraper(None),
+        "Auchan": AuchanScraper(None),
+    }
+    for nom, domaine in config.SHOPIFY_SHOPS.items():
+        tous_scrapers[nom] = ShopifyScraper(nom, domaine, None)
+    for nom, domaine in config.WOO_SHOPS.items():
+        tous_scrapers[nom] = WooCommerceScraper(nom, domaine, None)
+    scrapers_map = {k: v for k, v in tous_scrapers.items() if k in config.ENABLED_STORES}
+    ignorees = [k for k in tous_scrapers if k not in scrapers_map]
+    logger.info("Enseignes actives : %s%s", ", ".join(scrapers_map) or "AUCUNE",
+                f" (désactivées : {', '.join(ignorees)})" if ignorees else "")
+    if not scrapers_map:
+        logger.error("Aucune enseigne active (ENABLED_STORES vide ?). Arrêt.")
+        return
 
-        tous_scrapers = {
-            "Cultura": CulturaScraper(browser),
-            "Leclerc": LeclercScraper(browser),
-            "KingJouet": KingJouetScraper(browser),
-            "Smyths": SmythsScraper(browser),
-            "GrandeRecre": GrandeRecreScraper(browser),
-            "Auchan": AuchanScraper(browser),
-        }
-        # Boutiques Shopify / WooCommerce (API JSON) : ajoutées dynamiquement.
-        for nom, domaine in config.SHOPIFY_SHOPS.items():
-            tous_scrapers[nom] = ShopifyScraper(nom, domaine, browser)
-        for nom, domaine in config.WOO_SHOPS.items():
-            tous_scrapers[nom] = WooCommerceScraper(nom, domaine, browser)
-        # On ne surveille que les enseignes activées (cf. ENABLED_STORES) : évite de
-        # gaspiller des minutes sur les sites blindés qui ne répondent jamais.
-        scrapers_map = {k: v for k, v in tous_scrapers.items() if k in config.ENABLED_STORES}
-        ignorees = [k for k in tous_scrapers if k not in scrapers_map]
-        logger.info("Enseignes actives : %s%s", ", ".join(scrapers_map) or "AUCUNE",
-                    f" (désactivées : {', '.join(ignorees)})" if ignorees else "")
-        if not scrapers_map:
-            logger.error("Aucune enseigne active (ENABLED_STORES vide ?). Arrêt.")
-            return
+    # Navigateur seulement si une enseigne activée en a besoin.
+    playwright_ctx = None
+    browser = None
+    if any(getattr(s, "utilise_navigateur", True) for s in scrapers_map.values()):
+        playwright_ctx = await async_playwright().start()
+        browser = await playwright_ctx.chromium.launch(headless=True)
+        for s in scrapers_map.values():
+            s.browser = browser
+        logger.info("Navigateur Playwright lancé (une enseigne protégée est activée).")
+    else:
+        logger.info("Mode léger : aucune enseigne protégée → pas de navigateur lancé.")
 
-        cycle_num = 0
-        # Compteurs pour le heartbeat (réinitialisés à chaque résumé envoyé).
-        hb_restocks, hb_nouveautes, hb_cycles = 0, 0, 0
-        derniere_heartbeat = time.time()
-        dernier_rapport = None
+    cycle_num = 0
+    # Compteurs pour le heartbeat (réinitialisés à chaque résumé envoyé).
+    hb_restocks, hb_nouveautes, hb_cycles = 0, 0, 0
+    derniere_heartbeat = time.time()
+    dernier_rapport = None
+    alertes_total = 0
 
-        # Amorçage : si la base est vide au démarrage, le 1er cycle remplit la
-        # watchlist SANS alerter (évite l'inondation au lancement officiel).
-        amorcage_initial = len(await database.recuperer_tous_produits()) == 0
-        if amorcage_initial:
-            logger.info("Base vide : 1er cycle en AMORÇAGE silencieux (aucune alerte).")
+    # Amorçage : si la base est vide au démarrage, le 1er cycle remplit la
+    # watchlist SANS alerter (évite l'inondation au lancement officiel).
+    amorcage_initial = len(await database.recuperer_tous_produits()) == 0
+    if amorcage_initial:
+        logger.info("Base vide : 1er cycle en AMORÇAGE silencieux (aucune alerte).")
 
-        try:
-            while True:
-                cycle_num += 1
-                logger.info("=== CYCLE %d ===", cycle_num)
+    bot_state.set_status(running=True, demarre_a=time.time(), cycle=0,
+                         alertes_total=0, dernier_resume="", enseignes={})
+    try:
+        while True:
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Arrêt demandé — sortie propre de la boucle.")
+                break
+            cycle_num += 1
+            logger.info("=== CYCLE %d ===", cycle_num)
 
-                # Résilience : une erreur inattendue dans un cycle ne doit JAMAIS
-                # tuer le bot. On logge et on passe au cycle suivant.
+            # Résilience : une erreur inattendue dans un cycle ne doit JAMAIS
+            # tuer le bot. On logge et on passe au cycle suivant.
+            try:
+                est_recherche = (cycle_num == 1 or cycle_num % config.SEARCH_INTERVAL == 0)
+                if est_recherche:
+                    rapport = await cycle_recherche(
+                        scrapers_map, cycle_num,
+                        amorcage=(cycle_num == 1 and amorcage_initial),
+                    )
+                else:
+                    rapport = await cycle_watchlist(scrapers_map, cycle_num)
+
+                resume = rapport.resume()
+                logger.info(resume)
+                dernier_rapport = rapport
+                hb_cycles += 1
+                hb_restocks += sum(s.restocks for s in rapport.stores)
+                hb_nouveautes += sum(s.nouveautes for s in rapport.stores)
+                alertes_total += sum(s.restocks + s.nouveautes for s in rapport.stores)
+
+                # Statut live pour l'interface graphique.
                 try:
-                    if cycle_num == 1 or cycle_num % config.SEARCH_INTERVAL == 0:
-                        rapport = await cycle_recherche(
-                            scrapers_map, cycle_num,
-                            amorcage=(cycle_num == 1 and amorcage_initial),
-                        )
-                    else:
-                        rapport = await cycle_watchlist(scrapers_map, cycle_num)
+                    produits = await database.recuperer_tous_produits()
+                    bot_state.set_status(
+                        cycle=cycle_num,
+                        mode="recherche" if est_recherche else "watchlist",
+                        produits=len(produits),
+                        alertes_total=alertes_total,
+                        dernier_resume=resume,
+                        enseignes={s.enseigne: s.statut for s in rapport.stores},
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error("Erreur cycle %d (le bot continue): %s", cycle_num, e,
+                             exc_info=True)
 
-                    logger.info(rapport.resume())
-                    dernier_rapport = rapport
-                    hb_cycles += 1
-                    hb_restocks += sum(s.restocks for s in rapport.stores)
-                    hb_nouveautes += sum(s.nouveautes for s in rapport.stores)
-                except Exception as e:
-                    logger.error("Erreur cycle %d (le bot continue): %s", cycle_num, e,
-                                 exc_info=True)
+            if config.RUN_ONCE:
+                logger.info("RUN_ONCE actif. Arrêt.")
+                break
 
-                if config.RUN_ONCE:
-                    logger.info("RUN_ONCE actif. Arrêt.")
-                    break
+            # Heartbeat périodique (preuve de vie + bilan).
+            if (config.HEARTBEAT_INTERVAL > 0
+                    and time.time() - derniere_heartbeat >= config.HEARTBEAT_INTERVAL):
+                await _envoyer_heartbeat(hb_restocks, hb_nouveautes, hb_cycles, dernier_rapport)
+                hb_restocks, hb_nouveautes, hb_cycles = 0, 0, 0
+                derniere_heartbeat = time.time()
 
-                # Heartbeat périodique (preuve de vie + bilan).
-                if (config.HEARTBEAT_INTERVAL > 0
-                        and time.time() - derniere_heartbeat >= config.HEARTBEAT_INTERVAL):
-                    await _envoyer_heartbeat(hb_restocks, hb_nouveautes, hb_cycles, dernier_rapport)
-                    hb_restocks, hb_nouveautes, hb_cycles = 0, 0, 0
-                    derniere_heartbeat = time.time()
-
-                duree = random.randint(config.MIN_SLEEP, config.MAX_SLEEP)
-                logger.info("Prochain cycle dans %ds.", duree)
-                await asyncio.sleep(duree)
-        finally:
-            await browser.close()
-            if bot_task is not None:
-                import discord_bot
+            duree = random.randint(config.MIN_SLEEP, config.MAX_SLEEP)
+            logger.info("Prochain cycle dans %ds.", duree)
+            await _dormir(duree, stop_event)
+    finally:
+        bot_state.set_status(running=False)
+        if browser is not None:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+        if playwright_ctx is not None:
+            try:
+                await playwright_ctx.stop()
+            except Exception:
+                pass
+        if bot_task is not None:
+            import discord_bot
+            try:
                 await discord_bot.arreter()
-                bot_task.cancel()
+            except Exception:
+                pass
+            bot_task.cancel()
 
 
 if __name__ == "__main__":

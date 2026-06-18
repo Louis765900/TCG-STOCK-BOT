@@ -25,6 +25,8 @@ API_URL = "https://www.e.leclerc/api/rest/live-api/product-search?text={q}"
 
 class LeclercScraper(BaseScraper):
 
+    utilise_navigateur = False  # API JSON interne, aucun navigateur requis
+
     def __init__(self, browser):
         super().__init__("Leclerc", browser)
 

@@ -26,6 +26,8 @@ _SUGGEST = ("{base}/search/suggest.json?q={q}"
 
 class ShopifyScraper(BaseScraper):
 
+    utilise_navigateur = False  # API JSON publique, aucun navigateur requis
+
     def __init__(self, enseigne: str, domaine: str, browser):
         super().__init__(enseigne, browser)
         self.domaine = domaine

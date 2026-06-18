@@ -1,9 +1,76 @@
 """Configuration centrale de TCG-STOCK-BOT."""
 import os
+import json
 import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+# ---------------------------------------------------------------------------
+# Configuration en couches (pour l'appli packagée + l'assistant de 1ère config)
+# Priorité (la dernière l'emporte) :
+#   1. .env (développement)
+#   2. réglages pré-remplis embarqués (bundled_settings.json, à côté du code/exe)
+#   3. réglages utilisateur (%APPDATA%\TCGStockBot\settings.json)
+# Chaque couche est un simple JSON {CLE: valeur}. Les valeurs alimentent os.environ
+# puis sont lues normalement par os.getenv ci-dessous — aucun autre code à changer.
+# ---------------------------------------------------------------------------
+def dossier_donnees() -> str:
+    """Dossier de données de l'appli (créable). Surchargable via TCG_DATA_DIR."""
+    forced = os.getenv("TCG_DATA_DIR")
+    if forced:
+        return forced
+    if os.name == "nt" and os.getenv("APPDATA"):
+        return os.path.join(os.getenv("APPDATA"), "TCGStockBot")
+    return os.path.join(os.path.expanduser("~"), ".tcgstockbot")
+
+
+CHEMIN_CONFIG_UTILISATEUR = os.path.join(dossier_donnees(), "settings.json")
+CHEMIN_CONFIG_EMBARQUEE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "bundled_settings.json")
+
+
+def _appliquer_couche(chemin: str) -> None:
+    try:
+        with open(chemin, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return
+    except Exception as e:  # JSON invalide : on ignore sans planter le bot
+        logging.warning("Réglages illisibles (%s) : %s", chemin, e)
+        return
+    if isinstance(data, dict):
+        for cle, valeur in data.items():
+            if valeur is not None:
+                os.environ[str(cle)] = str(valeur)
+
+
+_appliquer_couche(CHEMIN_CONFIG_EMBARQUEE)
+_appliquer_couche(CHEMIN_CONFIG_UTILISATEUR)
+
+
+def sauver_reglages_utilisateur(reglages: dict) -> str:
+    """Écrit/fusionne les réglages utilisateur (utilisé par l'assistant de l'appli).
+
+    Retourne le chemin du fichier. Fusionne avec l'existant (ne perd rien).
+    """
+    os.makedirs(dossier_donnees(), exist_ok=True)
+    chemin = os.path.join(dossier_donnees(), "settings.json")
+    actuel = {}
+    try:
+        with open(chemin, encoding="utf-8") as f:
+            actuel = json.load(f)
+    except Exception:
+        actuel = {}
+    actuel.update({k: v for k, v in reglages.items() if v is not None})
+    with open(chemin, "w", encoding="utf-8") as f:
+        json.dump(actuel, f, ensure_ascii=False, indent=2)
+    # Applique immédiatement à l'environnement courant.
+    for k, v in actuel.items():
+        if v is not None:
+            os.environ[str(k)] = str(v)
+    return chemin
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
