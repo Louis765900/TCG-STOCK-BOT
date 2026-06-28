@@ -8,6 +8,39 @@ sys.path.insert(0, os.path.join(_RACINE, "desktop"))
 import discord_webhook as dw
 from discord_webhook import build_alert_embed, build_buy_components
 from product_format import normalize_product
+import discord_bot as db
+
+
+class _FauxUser:
+    def __init__(self, uid, admin):
+        self.id = uid
+        class _P: administrator = admin
+        self.guild_permissions = _P()
+
+
+class _FauxInteraction:
+    def __init__(self, user):
+        self.user = user
+
+
+def test_securite_discord():
+    # Validation de domaine par hostname EXACT (anti-SSRF) : une sous-chaine ne suffit pas.
+    assert db._enseigne_pour_url("https://www.auchan.fr/p/x") == "Auchan"
+    assert db._enseigne_pour_url("https://www.e.leclerc/produit") == "Leclerc"
+    assert db._enseigne_pour_url("https://www.smythstoys.com/fr/x") == "Smyths"
+    assert db._enseigne_pour_url("https://evil.com/?x=auchan.fr") is None
+    assert db._enseigne_pour_url("https://auchan.fr.evil.com/x") is None
+    assert db._enseigne_pour_url("http://169.254.169.254/latest/?d=auchan.fr") is None
+
+    # Autorisation : sans OWNER_ID -> admin requis ; membre lambda refusé.
+    db.DISCORD_OWNER_ID = ""
+    assert db.est_autorise(_FauxInteraction(_FauxUser(1, True))) is True
+    assert db.est_autorise(_FauxInteraction(_FauxUser(2, False))) is False
+    # Avec OWNER_ID -> seul cet utilisateur, même un admin tiers est refusé.
+    db.DISCORD_OWNER_ID = "42"
+    assert db.est_autorise(_FauxInteraction(_FauxUser(42, False))) is True
+    assert db.est_autorise(_FauxInteraction(_FauxUser(7, True))) is False
+    db.DISCORD_OWNER_ID = ""
 
 PROD = {"url": "https://x.fr/p/pr-C1", "titre": "Coffret Pokemon", "prix": "54.99",
         "en_stock": True, "country": "FR", "ean": "0820650559013",
@@ -49,6 +82,9 @@ def test():
     # Heartbeat ne ping jamais
     asyncio.run(dw.envoyer_message({"title": "resume"}))
     assert "content" not in captures
+
+    # Correctifs sécurité (SSRF /add + autorisation des commandes)
+    test_securite_discord()
 
 
 if __name__ == "__main__":

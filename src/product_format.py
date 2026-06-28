@@ -67,7 +67,7 @@ def est_revendeur(store: str, seller: str) -> bool:
 
 def seller_badge(store: str, seller: str) -> str:
     """Libellé vendeur avec pastille : ✅ officiel / 🔁 revendeur (marketplace)."""
-    s = clean_text(seller)
+    s = escape_markdown(seller)
     if est_vendeur_officiel(store, seller):
         return f"✅ {s or 'Vendeur officiel'}"
     return f"🔁 {s or 'Marketplace'} (revendeur)"
@@ -112,6 +112,31 @@ def normalize_product(prod: dict, enseigne: str) -> dict:
 def clean_text(value: object) -> str:
     text = str(value or "").replace("\xa0", " ")
     return re.sub(r"\s+", " ", text).strip()
+
+
+# Caracteres ayant un sens en Markdown Discord (rendu dans description + champs).
+_MD_SPECIAUX = re.compile(r"([\\*_~`|>\[\]()#-])")
+
+
+def escape_markdown(value: object) -> str:
+    """Neutralise le Markdown d'un texte scrape avant affichage dans un embed.
+
+    Un titre/vendeur provenant d'un site tiers (potentiellement piege) ne doit
+    pas pouvoir injecter de faux liens cliquables ni de mise en forme trompeuse
+    dans une alerte Discord. On echappe les caracteres speciaux.
+    """
+    return _MD_SPECIAUX.sub(r"\\\1", clean_text(value))
+
+
+def _url_sure(url: object) -> str:
+    """Retourne l'URL si elle est http(s) et sans caractere cassant un lien MD."""
+    u = clean_text(url)
+    if not (u.startswith("http://") or u.startswith("https://")):
+        return ""
+    # Une parenthese/espace dans l'URL casserait la syntaxe [label](url) : on rejette.
+    if any(c in u for c in "() <>"):
+        return ""
+    return u
 
 
 def clean_price(value: object) -> str:
@@ -264,7 +289,8 @@ def format_stock(product: dict) -> str:
 
 
 def markdown_links(links: dict[str, str]) -> str:
-    cleaned = [(clean_text(label), clean_text(url)) for label, url in links.items() if url]
+    cleaned = [(escape_markdown(label), _url_sure(url)) for label, url in links.items() if url]
+    cleaned = [(label, url) for label, url in cleaned if url]  # garde les URLs sûres
     if not cleaned:
         return "Aucun lien"
     return " | ".join(f"[{label}]({url})" for label, url in cleaned)

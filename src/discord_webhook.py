@@ -10,6 +10,7 @@ from config import (
 from product_format import (
     STORE_COLORS,
     ean_search_links,
+    escape_markdown,
     format_stock,
     markdown_links,
     normalize_product,
@@ -55,6 +56,12 @@ async def _post_avec_retry(session, url, *, headers=None, **kwargs) -> bool:
     return False
 
 
+def _est_url_web(url: object) -> bool:
+    """Vrai si l'URL est bien http(s) (filtre les schemas exotiques scrapes)."""
+    u = str(url or "").strip().lower()
+    return u.startswith("http://") or u.startswith("https://")
+
+
 def _bouton_lien(label: str, url: str) -> dict:
     """Bouton Discord de type 'lien' (ouvre une URL, aucun backend requis)."""
     return {"type": 2, "style": 5, "label": label[:80], "url": url}
@@ -69,7 +76,7 @@ def build_buy_components(product: dict) -> list:
     discord_bot.py via la passerelle. Les autres sont de simples liens.
     """
     boutons = []
-    if product.get("url"):
+    if _est_url_web(product.get("url")):
         boutons.append(_bouton_lien("🛒 Acheter", product["url"]))
     for label, url in ean_search_links(product["ean"], product["title"]).items():
         boutons.append(_bouton_lien(label, url))
@@ -205,13 +212,13 @@ def build_alert_embed(produit: dict, enseigne: str, type_alerte: str,
     search_links = ean_search_links(product["ean"], product["title"])
 
     fields = [
-        {"name": "Référence", "value": product["reference"], "inline": False},
+        {"name": "Référence", "value": escape_markdown(product["reference"]), "inline": False},
         {"name": "Prix", "value": price_value, "inline": True},
         {"name": "Stock", "value": format_stock(product), "inline": True},
     ]
     # Champs enrichis affiches seulement s'ils sont renseignes.
     if product.get("brand"):
-        fields.append({"name": "Marque", "value": product["brand"], "inline": True})
+        fields.append({"name": "Marque", "value": escape_markdown(product["brand"]), "inline": True})
     fields.append({"name": "Vendeur",
                    "value": seller_badge(product["store"], product.get("seller", "")),
                    "inline": True})
@@ -223,14 +230,17 @@ def build_alert_embed(produit: dict, enseigne: str, type_alerte: str,
 
     embed = {
         "title": build_embed_title(product),
-        "url": product["url"],
         "color": STORE_COLORS.get(product["store"], 0xE30613),
-        "description": f"**{product['detailed_reference']}**",
+        "description": f"**{escape_markdown(product['detailed_reference'])}**",
         "fields": fields,
         "footer": {"text": f"TCG-STOCK-BOT - {alert_label} - {product['store_label']}"},
     }
 
-    if product["image_url"]:
+    # On n'expose que des URLs http(s) (une URL exotique scrapee ferait rejeter
+    # tout l'embed par Discord, ou pointerait vers un schema non voulu).
+    if _est_url_web(product["url"]):
+        embed["url"] = product["url"]
+    if _est_url_web(product["image_url"]):
         embed["thumbnail"] = {"url": product["image_url"]}
 
     if with_chart:

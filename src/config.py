@@ -85,6 +85,11 @@ DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID", "")
 # si vide, pas de ping. Mettre l'identifiant du rôle Discord (Mode développeur).
 DISCORD_ALERT_ROLE_ID = os.getenv("DISCORD_ALERT_ROLE_ID", "")
 
+# Propriétaire autorisé à utiliser les commandes qui MODIFIENT l'état du bot
+# (/add, /pause, /resume). Optionnel : si vide, on retombe sur "permission
+# administrateur du serveur". Mettre l'identifiant utilisateur Discord (Mode dev).
+DISCORD_OWNER_ID = os.getenv("DISCORD_OWNER_ID", "")
+
 if not DISCORD_WEBHOOK_URL and not (DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID):
     logging.warning("⚠️ Aucun canal Discord configuré (ni webhook, ni bot).")
 

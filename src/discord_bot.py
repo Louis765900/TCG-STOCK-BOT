@@ -22,7 +22,7 @@ from discord import app_commands
 
 import bot_state
 import database
-from config import DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID
+from config import DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, DISCORD_OWNER_ID
 
 logger = logging.getLogger("discord_bot")
 
@@ -37,6 +37,30 @@ DOMAINES = {
     "smythstoys": "Smyths",
     "lagranderecre.fr": "GrandeRecre",
 }
+
+
+def _enseigne_pour_url(url: str) -> str | None:
+    """Enseigne correspondant a l'URL, par correspondance EXACTE de nom d'hote.
+
+    On compare le hostname reel (pas une sous-chaine de l'URL) : ainsi
+    'https://evil.com/?x=auchan.fr' n'est PAS reconnu comme Auchan. Empeche
+    qu'une URL arbitraire (SSRF) soit ajoutee a la watchlist puis requetee.
+    """
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return None
+    labels = host.split(".")
+    for domaine, enseigne in DOMAINES.items():
+        d = domaine.lower()
+        if "." in d:
+            # Domaine complet : host doit etre ce domaine ou un sous-domaine.
+            if host == d or host.endswith("." + d):
+                return enseigne
+        else:
+            # Mot-cle nu (ex. 'smythstoys') : doit etre un label entier du host.
+            if d in labels:
+                return enseigne
+    return None
 
 
 # =============================================================================
@@ -98,9 +122,9 @@ def _titre_depuis_url(url: str) -> str:
 
 async def ajouter_produit_url(url: str) -> str:
     url = (url or "").strip()
-    if not url.startswith("http"):
-        return "❌ URL invalide (elle doit commencer par http)."
-    enseigne = next((e for d, e in DOMAINES.items() if d in url), None)
+    if urlparse(url).scheme != "https":
+        return "❌ URL invalide (elle doit commencer par https://)."
+    enseigne = _enseigne_pour_url(url)
     if not enseigne:
         return ("❌ Enseigne non reconnue pour cette URL.\n"
                 "Enseignes gérées : " + ", ".join(sorted(set(DOMAINES.values()))))
@@ -109,6 +133,30 @@ async def ajouter_produit_url(url: str) -> str:
     titre = _titre_depuis_url(url)
     await database.ajouter_produit(url, titre, enseigne, False)
     return f"✅ Ajouté à la surveillance **[{enseigne}]** : {titre}"
+
+
+# =============================================================================
+# Controle d'acces (commandes qui modifient l'etat du bot)
+# =============================================================================
+
+_REFUS = "⛔ Commande réservée à l'administrateur du bot."
+
+
+def est_autorise(interaction: discord.Interaction) -> bool:
+    """Vrai si l'auteur peut piloter le bot (/add, /pause, /resume).
+
+    - Si DISCORD_OWNER_ID est defini : seul cet utilisateur est autorise.
+    - Sinon : toute personne disposant de la permission 'administrateur' sur le
+      serveur. (Par defaut Discord, sans config, on ne se repose donc PAS sur
+      'tout le monde' : un membre lambda ne peut pas couper les alertes.)
+    """
+    user = getattr(interaction, "user", None)
+    if user is None:
+        return False
+    if DISCORD_OWNER_ID:
+        return str(getattr(user, "id", "")) == str(DISCORD_OWNER_ID)
+    perms = getattr(user, "guild_permissions", None)
+    return bool(perms and perms.administrator)
 
 
 # =============================================================================
@@ -180,15 +228,24 @@ def creer_client() -> discord.Client:
     @tree.command(name="add", description="Ajouter un produit à surveiller")
     @app_commands.describe(url="Lien du produit à surveiller")
     async def cmd_add(interaction: discord.Interaction, url: str):
+        if not est_autorise(interaction):
+            await interaction.response.send_message(_REFUS, ephemeral=True)
+            return
         await interaction.response.send_message(await ajouter_produit_url(url), ephemeral=True)
 
     @tree.command(name="pause", description="Couper les alertes (le bot continue de tourner)")
     async def cmd_pause(interaction: discord.Interaction):
+        if not est_autorise(interaction):
+            await interaction.response.send_message(_REFUS, ephemeral=True)
+            return
         bot_state.set_pause(True)
         await interaction.response.send_message("⏸️ Alertes mises en pause.", ephemeral=True)
 
     @tree.command(name="resume", description="Réactiver les alertes")
     async def cmd_resume(interaction: discord.Interaction):
+        if not est_autorise(interaction):
+            await interaction.response.send_message(_REFUS, ephemeral=True)
+            return
         bot_state.set_pause(False)
         await interaction.response.send_message("▶️ Alertes réactivées.", ephemeral=True)
 

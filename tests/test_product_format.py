@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(_RACINE, "desktop"))
 from product_format import (
     normalize_product, clean_price, clean_ean, compute_discount, format_stock,
     est_vendeur_officiel, est_revendeur, seller_badge, cardmarket_link, ean_search_links,
-    mots_cles_recherche,
+    mots_cles_recherche, escape_markdown, markdown_links,
 )
 
 
@@ -62,6 +62,19 @@ def test():
     assert "Display+M1S" in lien
     # Repli : un titre entièrement filtré ne casse pas (garde le titre nettoyé)
     assert mots_cles_recherche("Pokémon scellé FR") == "Pokémon scellé FR"
+
+    # Échappement Markdown : un titre piégé ne doit pas produire de lien cliquable
+    # ni de mise en forme dans l'embed Discord. (Sécurité — anti-injection)
+    piege = escape_markdown("[Cliquez](http://evil) **gratuit**")
+    assert "[" not in piege.replace("\\[", "") and "(" not in piege.replace("\\(", "")
+    assert seller_badge("Leclerc", "[x](http://evil)").startswith("🔁")
+    assert "](" not in seller_badge("Leclerc", "[x](http://evil)")
+
+    # markdown_links : rejette une URL non http(s) ou cassant la syntaxe du lien
+    liens = markdown_links({"Bon": "https://ok.fr/p", "Mauvais": "javascript:alert(1)",
+                            "Casse": "https://x.fr/a)b"})
+    assert "[Bon](https://ok.fr/p)" in liens
+    assert "javascript" not in liens and "a)b" not in liens
 
 
 if __name__ == "__main__":

@@ -1047,3 +1047,43 @@ On recolle aussi les codes coupés par un tiret (**OP-09 → OP09**) et on limit
 ### Vérifs
 Tests **11/11** (3 nouveaux cas pour les mots-clés Cardmarket). Essais réels OK
 (Pokémon ET One Piece).
+
+---
+
+## 🛡️ Chantier 24 — Audit de sécurité + corrections
+
+**Date :** 28 juin 2026 (relecture de tout le code « de A à Z »)
+
+### Ce qu'on a cherché
+J'ai relu **tout** le code à la recherche de failles : injections, secrets,
+accès non autorisés, etc. **Bonne nouvelle** : pas d'injection SQL (requêtes
+paramétrées), pas de `eval`/`subprocess` dangereux, le HTTPS est bien vérifié, et
+rien de secret n'a été poussé sur GitHub. Restaient **4 points à corriger**.
+
+### Ce que j'ai corrigé
+1. **Commandes Discord verrouillées.** Avant, n'importe quel membre du serveur
+   pouvait taper `/pause` et **couper toutes les alertes**. Désormais `/add`,
+   `/pause`, `/resume` sont **réservés à l'administrateur** (ou à un
+   `DISCORD_OWNER_ID` précis).
+2. **Faille « adresse piégée » (`/add`) fermée.** On vérifiait l'enseigne en
+   cherchant le nom du site **n'importe où** dans le lien → une adresse bidon
+   comme `evil.com/?x=auchan.fr` passait, et le bot allait **la visiter** à chaque
+   tour. Maintenant on compare le **vrai nom de domaine** : seules les vraies
+   boutiques connues sont acceptées (en **https** uniquement).
+3. **Alertes anti-piégeage.** Un nom de produit venu d'un site peut contenir du
+   « code d'affichage » (Markdown). On le **neutralise** pour qu'une alerte ne
+   puisse pas afficher de **faux lien cliquable**. On n'accepte que des liens
+   `http(s)`.
+4. **Dépendances figées.** `requirements.txt` indique maintenant des **versions
+   précises** : on installe toujours la même chose (pas de mauvaise surprise si un
+   paquet change).
+
+### Côté Louis (hors code, avant de livrer à Tom)
+- **Régénérer les clés/jeton** (ScrapingBee, ZenRows, Crawlbase, jeton Discord) :
+  ils ont été affichés en clair, donc considérés comme à changer.
+- Ne **jamais** zipper/partager le dossier avec `bundled_settings.json` dedans
+  (il contient les clés ; il est ignoré par git mais pas par une copie de dossier).
+
+### Vérifs
+Tests **11/11** (nouveaux cas : autorisation, validation de domaine anti-SSRF,
+échappement Markdown).
