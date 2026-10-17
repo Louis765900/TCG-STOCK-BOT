@@ -64,7 +64,8 @@ async def initialiser_db():
             image_url TEXT DEFAULT '',
             derniere_alerte REAL DEFAULT 0,
             dernier_vu REAL NOT NULL,
-            date_decouverte REAL NOT NULL
+            date_decouverte REAL NOT NULL,
+            manuel INTEGER DEFAULT 0
         )
     """)
     await db.execute("""
@@ -114,6 +115,10 @@ async def _migrer_colonnes(db):
     if "derniere_alerte" not in colonnes:
         await db.execute("ALTER TABLE produits ADD COLUMN derniere_alerte REAL DEFAULT 0")
         logger.info("Migration: colonne 'derniere_alerte' ajoutée.")
+    if "manuel" not in colonnes:
+        # 1 = ajoute a la main (/watch, /add) : jamais purge par le filtre automatique.
+        await db.execute("ALTER TABLE produits ADD COLUMN manuel INTEGER DEFAULT 0")
+        logger.info("Migration: colonne 'manuel' ajoutée.")
 
 
 async def recuperer_produit(url: str):
@@ -131,7 +136,7 @@ async def recuperer_tous_produits() -> list[dict]:
 
 
 async def ajouter_produit(url: str, titre: str, enseigne: str, en_stock: bool,
-                          prix: str = "N/A", image_url: str = ""):
+                          prix: str = "N/A", image_url: str = "", manuel: bool = False):
     now = time.time()
     # Garde-fou : SQLite n'accepte que des types simples. Un champ inattendu
     # (ex. image renvoyée comme objet par une API) ne doit jamais tout bloquer.
@@ -142,9 +147,9 @@ async def ajouter_produit(url: str, titre: str, enseigne: str, en_stock: bool,
     db = await _conn()
     await db.execute(
         """INSERT INTO produits
-           (url, titre, enseigne, en_stock, prix, image_url, dernier_vu, date_decouverte)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (url, titre, enseigne, int(en_stock), prix, image_url, now, now)
+           (url, titre, enseigne, en_stock, prix, image_url, dernier_vu, date_decouverte, manuel)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (url, titre, enseigne, int(en_stock), prix, image_url, now, now, int(manuel))
     )
     await db.commit()
 
@@ -171,6 +176,14 @@ async def supprimer_produit(url: str):
     await db.execute("DELETE FROM produits WHERE url = ?", (url,))
     await db.execute("DELETE FROM price_history WHERE url = ?", (url,))
     await db.commit()
+
+
+async def retirer_produit(url: str) -> bool:
+    """Retire un produit de la watchlist ; True s'il existait."""
+    if await recuperer_produit(url) is None:
+        return False
+    await supprimer_produit(url)
+    return True
 
 
 async def marquer_vu(url: str):

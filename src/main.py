@@ -277,7 +277,7 @@ async def _traiter_resultat_watchlist(enseigne: str, item: dict, res: dict, stor
     # s'il a été ajouté avant un durcissement du filtre. On re-valide ici (titre +
     # marque fraîche) AVANT toute alerte : si ce n'est pas du JCC Pokémon scellé, on
     # le purge et on n'alerte jamais. C'est le filet qui garantit zéro alerte parasite.
-    if not est_tcg_valide_local(item["titre"], res.get("brand", "")):
+    if not item.get("manuel") and not est_tcg_valide_local(item["titre"], res.get("brand", "")):
         logger.info("Purge watchlist (hors-cible) [%s]: %s", enseigne, item["titre"])
         await database.supprimer_produit(url)
         return
@@ -350,7 +350,7 @@ async def _purger_watchlist() -> int:
     produits = await database.recuperer_tous_produits()
     purges = 0
     for p in produits:
-        if not est_tcg_valide_local(p["titre"]):
+        if not p.get("manuel") and not est_tcg_valide_local(p["titre"]):
             await database.supprimer_produit(p["url"])
             logger.info("Purge démarrage (hors-cible) [%s]: %s", p["enseigne"], p["titre"])
             purges += 1

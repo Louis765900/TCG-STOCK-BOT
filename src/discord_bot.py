@@ -14,15 +14,18 @@ Demarre uniquement si DISCORD_BOT_TOKEN + DISCORD_CHANNEL_ID sont configures.
 """
 
 import logging
+import math
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
 
 import discord
 from discord import app_commands
 
 import bot_state
 import database
+import config
 from config import DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, DISCORD_OWNER_ID
+from product_format import escape_markdown
 
 logger = logging.getLogger("discord_bot")
 
@@ -39,6 +42,15 @@ DOMAINES = {
 }
 
 
+def _domaines_connus() -> dict:
+    """Enseignes dediees + boutiques Shopify/WooCommerce configurees (domaine -> nom)."""
+    domaines = dict(DOMAINES)
+    for table in (config.SHOPIFY_SHOPS, config.WOO_SHOPS):
+        for nom, dom in table.items():
+            domaines[dom.lower().removeprefix("www.")] = nom
+    return domaines
+
+
 def _enseigne_pour_url(url: str) -> str | None:
     """Enseigne correspondant a l'URL, par correspondance EXACTE de nom d'hote.
 
@@ -50,7 +62,7 @@ def _enseigne_pour_url(url: str) -> str | None:
     if not host:
         return None
     labels = host.split(".")
-    for domaine, enseigne in DOMAINES.items():
+    for domaine, enseigne in _domaines_connus().items():
         d = domaine.lower()
         if "." in d:
             # Domaine complet : host doit etre ce domaine ou un sous-domaine.
@@ -74,7 +86,10 @@ def texte_aide() -> str:
         "• `/stats` — produits surveillés, en stock, état des alertes\n"
         "• `/status` — santé et vitesse de chaque enseigne (24 h)\n"
         "• `/watchlist` — liste des produits suivis\n"
-        "• `/add <url>` — ajouter un produit à surveiller\n"
+        "• `/list [page] [enseigne]` — produits suivis (paginé)\n"
+        "• `/watch <url>` — ajouter un produit à surveiller (admin)\n"
+        "• `/unwatch <url>` — retirer un produit (admin)\n"
+        "• `/add <url>` — identique à `/watch`\n"
         "• `/pause` — couper les alertes (le bot continue de tourner)\n"
         "• `/resume` — réactiver les alertes\n"
     )
@@ -137,19 +152,87 @@ def _titre_depuis_url(url: str) -> str:
     return (base[:80].title() or "Produit")
 
 
-async def ajouter_produit_url(url: str) -> str:
+_URL_MAX = 500
+_PARAMS_SUIVI = ("utm_", "fbclid", "gclid", "mc_", "xtor", "xtcr")
+
+
+def normaliser_url(url: str) -> str | None:
+    """URL canonique pour la watchlist, ou None si elle n'est pas acceptable.
+
+    Regles (anti-SSRF + anti-doublons) : https uniquement, pas d'identifiants dans
+    l'URL (user:pass@), pas de port exotique, pas de caracteres de controle ; nom
+    d'hote en minuscules ; fragment et parametres de suivi (utm_*, fbclid...)
+    retires pour qu'un meme produit ne soit pas ajoute deux fois.
+    """
     url = (url or "").strip()
-    if urlparse(url).scheme != "https":
-        return "❌ URL invalide (elle doit commencer par https://)."
-    enseigne = _enseigne_pour_url(url)
+    if not url or len(url) > _URL_MAX or any(ord(c) < 33 or ord(c) == 127 for c in url):
+        return None
+    try:
+        p = urlsplit(url)
+        port = p.port
+    except ValueError:
+        return None
+    if p.scheme != "https" or not p.hostname or p.username or p.password:
+        return None
+    if port not in (None, 443):
+        return None
+    query = urlencode([(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
+                       if not k.lower().startswith(_PARAMS_SUIVI)])
+    return urlunsplit(("https", p.hostname.lower(), p.path, query, ""))
+
+
+async def ajouter_produit_url(url: str) -> str:
+    """Ajoute un produit a la watchlist (commandes /watch et /add)."""
+    propre = normaliser_url(url)
+    if propre is None:
+        return "❌ URL invalide (https:// requis, sans identifiants ni port particulier)."
+    enseigne = _enseigne_pour_url(propre)
     if not enseigne:
         return ("❌ Enseigne non reconnue pour cette URL.\n"
-                "Enseignes gérées : " + ", ".join(sorted(set(DOMAINES.values()))))
-    if await database.recuperer_produit(url):
+                "Enseignes gérées : " + ", ".join(sorted(set(_domaines_connus().values()))))
+    if enseigne not in config.ENABLED_STORES:
+        return f"❌ L'enseigne **{enseigne}** est désactivée (ENABLED_STORES) : produit non surveillé."
+    if await database.recuperer_produit(propre):
         return "ℹ️ Ce produit est déjà dans la watchlist."
-    titre = _titre_depuis_url(url)
-    await database.ajouter_produit(url, titre, enseigne, False)
-    return f"✅ Ajouté à la surveillance **[{enseigne}]** : {titre}"
+    titre = _titre_depuis_url(propre)
+    # manuel=True : le filtre automatique ne doit jamais purger un ajout volontaire.
+    await database.ajouter_produit(propre, titre, enseigne, False, manuel=True)
+    return f"✅ Ajouté à la surveillance **[{enseigne}]** : {escape_markdown(titre)}"
+
+
+async def retirer_produit_url(url: str) -> str:
+    """Retire un produit de la watchlist (commande /unwatch)."""
+    propre = normaliser_url(url)
+    if propre is None:
+        return "❌ URL invalide (https:// requis)."
+    if await database.retirer_produit(propre):
+        return "🗑️ Produit retiré de la surveillance."
+    return "ℹ️ Ce produit n'est pas dans la watchlist."
+
+
+_PAR_PAGE = 10
+
+
+async def texte_liste(page: int = 1, enseigne: str | None = None) -> str:
+    """Liste paginee des produits suivis (10 par page), filtrable par enseigne."""
+    produits = await database.recuperer_tous_produits()
+    if enseigne:
+        produits = [p for p in produits if p["enseigne"].lower() == enseigne.strip().lower()]
+    if not produits:
+        if enseigne:
+            return f"📋 Aucun produit suivi pour **{escape_markdown(enseigne)}**."
+        return "📋 Aucun produit suivi. Ajoute-en un avec `/watch <url>`."
+    pages = max(1, math.ceil(len(produits) / _PAR_PAGE))
+    page = min(max(1, int(page)), pages)
+    debut = (page - 1) * _PAR_PAGE
+    lignes = [f"**📋 Produits suivis** ({len(produits)}) — page {page}/{pages}"]
+    for p in produits[debut:debut + _PAR_PAGE]:
+        etat = "🟢" if p.get("en_stock") else "🔴"
+        lignes.append(f"{etat} [{p['enseigne']}] {escape_markdown(p['titre'][:48])} — "
+                      f"{p.get('prix', 'N/A')}")
+    if page < pages:
+        lignes.append(f"➡️ `/list page:{page + 1}` pour la suite")
+    return "\n".join(lignes)
 
 
 # =============================================================================
@@ -246,13 +329,38 @@ def creer_client() -> discord.Client:
     async def cmd_watchlist(interaction: discord.Interaction):
         await interaction.response.send_message(await texte_watchlist(), ephemeral=True)
 
-    @tree.command(name="add", description="Ajouter un produit à surveiller")
-    @app_commands.describe(url="Lien du produit à surveiller")
-    async def cmd_add(interaction: discord.Interaction, url: str):
+    @tree.command(name="list", description="Produits suivis (paginé)")
+    @app_commands.describe(page="Numéro de page", enseigne="Filtrer par enseigne")
+    async def cmd_list(interaction: discord.Interaction, page: int = 1,
+                       enseigne: str | None = None):
+        await interaction.response.send_message(await texte_liste(page, enseigne),
+                                                ephemeral=True)
+
+    async def _admin_url(interaction: discord.Interaction, url: str, action):
         if not est_autorise(interaction):
             await interaction.response.send_message(_REFUS, ephemeral=True)
             return
-        await interaction.response.send_message(await ajouter_produit_url(url), ephemeral=True)
+        try:
+            message = await action(url)
+        except Exception as e:
+            logger.error("Erreur commande watchlist : %s", e)
+            message = "❌ Erreur interne, réessaie."
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @tree.command(name="watch", description="Ajouter un produit à surveiller")
+    @app_commands.describe(url="Lien du produit à surveiller")
+    async def cmd_watch(interaction: discord.Interaction, url: str):
+        await _admin_url(interaction, url, ajouter_produit_url)
+
+    @tree.command(name="add", description="Ajouter un produit à surveiller (= /watch)")
+    @app_commands.describe(url="Lien du produit à surveiller")
+    async def cmd_add(interaction: discord.Interaction, url: str):
+        await _admin_url(interaction, url, ajouter_produit_url)
+
+    @tree.command(name="unwatch", description="Retirer un produit de la surveillance")
+    @app_commands.describe(url="Lien du produit à retirer")
+    async def cmd_unwatch(interaction: discord.Interaction, url: str):
+        await _admin_url(interaction, url, retirer_produit_url)
 
     @tree.command(name="pause", description="Couper les alertes (le bot continue de tourner)")
     async def cmd_pause(interaction: discord.Interaction):

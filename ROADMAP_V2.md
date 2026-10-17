@@ -42,7 +42,7 @@ Points faibles relevés :
 
 - ✅ **C5 — Routage des alertes (par enseigne)** : `DISCORD_WEBHOOKS_BY_STORE` / `DISCORD_CHANNELS_BY_STORE`, repli sur le canal par défaut.
   - ⬜ C5b : routage par catégorie de produit et rôles par catégorie (dépend de C11).
-- ⬜ **C6 — Commandes** : `/watch`, `/unwatch`, `/list`, `/stats`, filtres par enseigne.
+- ✅ **C6 — Watchlist depuis Discord** : `/watch`, `/unwatch`, `/list` (paginé, filtre enseigne) ; `/add` et `/watchlist` conservés.
 
 ## P1 — Enseignes françaises
 
@@ -96,3 +96,10 @@ Points faibles relevés :
 - `discord_webhook` : `webhook_pour()` / `canal_pour()` avec repli par défaut ; l'enseigne est transmise jusqu'au transport.
 - Test : `test_discord.test_routage_par_enseigne` (routage, repli, envoi sans webhook par défaut). 13/13.
 - Aucune configuration de production modifiée : comportement identique tant que les variables sont vides.
+
+### C6 — Watchlist depuis Discord
+- `/watch <url>` (alias `/add`), `/unwatch <url>` : réservés à l'administrateur (ou `DISCORD_OWNER_ID`) ; `/list [page] [enseigne]` ouvert à tous, 10 produits par page.
+- `normaliser_url` : https uniquement, pas d'identifiants ni de port exotique, pas de caractères de contrôle, longueur ≤ 500 ; fragment et paramètres de suivi (`utm_*`, `fbclid`…) retirés → pas de doublon. L'hôte doit correspondre exactement à une enseigne connue (dédiées + Shopify/Woo configurées) et l'enseigne doit être active (`ENABLED_STORES`), sinon refus explicite.
+- Prise en compte par le moteur : la watchlist est relue en base à chaque cycle. **Correctif important** : colonne `manuel` (migration automatique, testée sur ancienne base) ; les produits ajoutés à la main ne sont plus purgés par le filtre JCC (le titre déduit de l'URL pouvait les faire supprimer en silence).
+- Tests : `test_watchlist_discord` (validation/SSRF, doublons, /unwatch, pagination, filtre, échappement Markdown, moteur : restock détecté sur un ajout manuel, produit retiré non surveillé). 14/14.
+- Limite connue : les commandes slash elles-mêmes (couche discord.py) ne sont pas testées contre l'API Discord réelle ; seule la logique sous-jacente et `est_autorise` le sont. Le titre d'un ajout manuel est déduit de l'URL (pas de lecture de la fiche à l'ajout).
