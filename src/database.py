@@ -265,3 +265,41 @@ async def mettre_a_jour_image(url: str, image_url: str):
         (image_url, url)
     )
     await db.commit()
+
+
+def _percentile(valeurs: list[float], q: float) -> float:
+    """Percentile par rang le plus proche (suffisant pour un tableau de bord)."""
+    if not valeurs:
+        return 0.0
+    v = sorted(valeurs)
+    return v[min(len(v) - 1, max(0, int(round(q * (len(v) - 1)))))]
+
+
+async def stats_enseignes(heures: float = 24.0) -> dict[str, dict]:
+    """Sante et latence par enseigne sur la fenetre recente (table cycle_logs).
+
+    Retourne {enseigne: {cycles, ok, taux_ok, duree_moy, duree_p95, dernier_statut}}.
+    """
+    limite = time.time() - heures * 3600
+    db = await _conn()
+    async with db.execute(
+        "SELECT enseigne, statut, duree_s FROM cycle_logs WHERE timestamp >= ? "
+        "ORDER BY timestamp", (limite,)
+    ) as cur:
+        rows = await cur.fetchall()
+    par: dict[str, list] = {}
+    for r in rows:
+        par.setdefault(r["enseigne"], []).append((r["statut"], r["duree_s"] or 0.0))
+    out = {}
+    for ens, lignes in par.items():
+        durees = [d for _, d in lignes]
+        ok = sum(1 for st, _ in lignes if st == "healthy")
+        out[ens] = {
+            "cycles": len(lignes),
+            "ok": ok,
+            "taux_ok": ok / len(lignes),
+            "duree_moy": sum(durees) / len(durees),
+            "duree_p95": _percentile(durees, 0.95),
+            "dernier_statut": lignes[-1][0],
+        }
+    return out

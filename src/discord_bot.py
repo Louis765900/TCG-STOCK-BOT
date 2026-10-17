@@ -72,6 +72,7 @@ def texte_aide() -> str:
         "**🛠️ Commandes TCG-STOCK-BOT**\n"
         "• `/help` — affiche cette aide\n"
         "• `/stats` — produits surveillés, en stock, état des alertes\n"
+        "• `/status` — santé et vitesse de chaque enseigne (24 h)\n"
         "• `/watchlist` — liste des produits suivis\n"
         "• `/add <url>` — ajouter un produit à surveiller\n"
         "• `/pause` — couper les alertes (le bot continue de tourner)\n"
@@ -95,6 +96,22 @@ async def texte_stats() -> str:
         f"Alertes : {etat}\n"
         f"Par enseigne : {repartition}"
     )
+
+
+async def texte_status(heures: float = 24.0) -> str:
+    stats = await database.stats_enseignes(heures)
+    if not stats:
+        return "🩺 Pas encore de données de cycle."
+    icone = {"healthy": "🟢", "blocked": "🔴", "timeout": "🟠", "parser_error": "🟠",
+             "empty": "🟡"}
+    lignes = [f"**🩺 Santé des enseignes** ({heures:g} h)"]
+    for ens, st in sorted(stats.items()):
+        lignes.append(
+            f"{icone.get(st['dernier_statut'], '⚪')} **{ens}** — "
+            f"{st['taux_ok'] * 100:.0f}% OK ({st['ok']}/{st['cycles']}) · "
+            f"moy {st['duree_moy']:.1f}s · p95 {st['duree_p95']:.1f}s"
+        )
+    return "\n".join(lignes)
 
 
 async def texte_watchlist(limite: int = 15) -> str:
@@ -220,6 +237,10 @@ def creer_client() -> discord.Client:
     @tree.command(name="stats", description="Produits surveillés et état du bot")
     async def cmd_stats(interaction: discord.Interaction):
         await interaction.response.send_message(await texte_stats(), ephemeral=True)
+
+    @tree.command(name="status", description="Santé et vitesse de chaque enseigne")
+    async def cmd_status(interaction: discord.Interaction):
+        await interaction.response.send_message(await texte_status(), ephemeral=True)
 
     @tree.command(name="watchlist", description="Liste des produits surveillés")
     async def cmd_watchlist(interaction: discord.Interaction):

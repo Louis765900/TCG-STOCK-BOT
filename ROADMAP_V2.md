@@ -35,7 +35,8 @@ Points faibles relevés :
   - ⬜ C2b (reporté) : boucles indépendantes par enseigne, watchlist chaude/froide.
 - ✅ **C3 — Robustesse des lectures** : rupture confirmée après `RUPTURE_CONFIRMATIONS` (=2) lectures « indisponible » consécutives → plus de faux restock après un glitch de page.
   - ⬜ C3b (reporté) : persistance de l'état de santé des enseignes.
-- ⬜ **C4 — Observabilité** : commande `/status` détaillée, latence p50/p95 par enseigne, journal structuré.
+- ✅ **C4 — Observabilité** : `database.stats_enseignes` (taux OK, durée moyenne/p95 sur 24 h) + commande Discord `/status`.
+  - ⬜ C4b (reporté) : journal structuré JSON.
 
 ## P1 — Discord
 
@@ -83,3 +84,8 @@ Points faibles relevés :
 - `stock_state.ConfirmationRupture` : état mémoire ; tant que la rupture n'est pas confirmée,
   la base reste « en stock » (aucune transition, aucun faux restock). Réglable via `.env`.
 - Tests : `test_stock_state` (confirmation, pause), `test_main_logic` (glitch isolé vs rupture réelle).
+
+### C4 — Observabilité
+- `stats_enseignes()` agrège `cycle_logs` (taux de succès, durée moyenne, p95, dernier statut).
+- Commande `/status` (lecture seule, éphémère) ; ajoutée à `/help`.
+- Test : `test_observabilite` (13/13 au total). `.env.example` complété (MIN_CYCLE_GAP, RUPTURE_CONFIRMATIONS).
