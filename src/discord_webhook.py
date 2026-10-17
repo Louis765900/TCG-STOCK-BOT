@@ -93,30 +93,29 @@ def _payload_multipart(payload: dict, chart_png: bytes) -> aiohttp.FormData:
     return form
 
 
-async def _envoyer_via_webhook(session, payload, chart_png):
+async def _envoyer_via_webhook(session, payload, chart_png) -> bool:
     """Transport historique : webhook simple (sans boutons)."""
     if chart_png:
-        await _post_avec_retry(session, DISCORD_WEBHOOK_URL,
-                               data=_payload_multipart(payload, chart_png))
-    else:
-        await _post_avec_retry(session, DISCORD_WEBHOOK_URL, json=payload)
+        return await _post_avec_retry(session, DISCORD_WEBHOOK_URL,
+                                      data=_payload_multipart(payload, chart_png))
+    return await _post_avec_retry(session, DISCORD_WEBHOOK_URL, json=payload)
 
 
-async def _envoyer_via_bot(session, payload, chart_png):
+async def _envoyer_via_bot(session, payload, chart_png) -> bool:
     """Transport bot : poste dans un canal, supporte les boutons/composants."""
     url = f"{DISCORD_API}/channels/{DISCORD_CHANNEL_ID}/messages"
     headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
     if chart_png:
-        await _post_avec_retry(session, url, headers=headers,
-                               data=_payload_multipart(payload, chart_png))
-    else:
-        await _post_avec_retry(session, url, headers=headers, json=payload)
+        return await _post_avec_retry(session, url, headers=headers,
+                                      data=_payload_multipart(payload, chart_png))
+    return await _post_avec_retry(session, url, headers=headers, json=payload)
 
 
 async def envoyer_alerte(produit: dict, enseigne: str, type_alerte: str,
-                         chart_png: bytes | None = None):
+                         chart_png: bytes | None = None) -> bool:
     """
-    Envoie une alerte stock sur Discord.
+    Envoie une alerte stock sur Discord. Retourne True si livree (ou si aucun canal
+    n'est configure : rien a livrer), False si l'envoi a echoue.
 
     Choisit automatiquement le transport :
       - bot configuré  -> message avec boutons (Acheter, recherches) ;
@@ -124,7 +123,7 @@ async def envoyer_alerte(produit: dict, enseigne: str, type_alerte: str,
     type_alerte: "NOUVEAUTE" ou "RESTOCK". Sérialisé + throttlé anti-429.
     """
     if not (_mode_bot() or DISCORD_WEBHOOK_URL):
-        return
+        return True
 
     embed = build_alert_embed(produit, enseigne, type_alerte, with_chart=bool(chart_png))
     payload = {"embeds": [embed]}
@@ -139,7 +138,7 @@ async def envoyer_alerte(produit: dict, enseigne: str, type_alerte: str,
         if components:
             payload["components"] = components
 
-    await _envoyer(payload, chart_png)
+    return await _envoyer(payload, chart_png)
 
 
 async def envoyer_message(embed: dict):
@@ -173,10 +172,34 @@ async def poster_embed(embed: dict, content: str = "") -> bool:
         return False
 
 
-async def _envoyer(payload: dict, chart_png: bytes | None = None):
-    """Coeur d'envoi : throttle anti-429 + choix du transport (bot/webhook)."""
+_sessions: dict = {}
+
+
+def _session_partagee() -> aiohttp.ClientSession:
+    """Session HTTP reutilisee entre les envois (evite une poignee de main TLS par
+    alerte, donc une alerte plus rapide). Une session par boucle asyncio."""
+    cle = id(asyncio.get_running_loop())
+    session = _sessions.get(cle)
+    if session is None or session.closed:
+        session = aiohttp.ClientSession()
+        _sessions[cle] = session
+    return session
+
+
+async def fermer_session():
+    for cle, session in list(_sessions.items()):
+        _sessions.pop(cle, None)
+        try:
+            await session.close()
+        except Exception:
+            pass
+
+
+async def _envoyer(payload: dict, chart_png: bytes | None = None) -> bool:
+    """Coeur d'envoi : throttle anti-429 + choix du transport (bot/webhook).
+    Retourne True si le message est livre."""
     if not (_mode_bot() or DISCORD_WEBHOOK_URL):
-        return
+        return True
 
     global _dernier_envoi
     async with _envoi_lock:
@@ -184,13 +207,13 @@ async def _envoyer(payload: dict, chart_png: bytes | None = None):
         if ecoule < _MIN_INTERVAL_S:
             await asyncio.sleep(_MIN_INTERVAL_S - ecoule)
         try:
-            async with aiohttp.ClientSession() as session:
-                if _mode_bot():
-                    await _envoyer_via_bot(session, payload, chart_png)
-                else:
-                    await _envoyer_via_webhook(session, payload, chart_png)
+            session = _session_partagee()
+            if _mode_bot():
+                return bool(await _envoyer_via_bot(session, payload, chart_png))
+            return bool(await _envoyer_via_webhook(session, payload, chart_png))
         except Exception as e:
             logger.error("Exception Discord: %s", e)
+            return False
         finally:
             _dernier_envoi = time.monotonic()
 

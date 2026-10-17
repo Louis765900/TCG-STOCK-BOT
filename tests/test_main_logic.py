@@ -88,6 +88,29 @@ async def _scenario():
     assert alertes == []  # restock ignoré : ce n'est pas du JCC
     assert await database.recuperer_produit("u5") is None  # et il est purgé
 
+    # --- Anti-doublon ATOMIQUE : 10 detections simultanees => 1 seule alerte ---
+    alertes.clear()
+    config.ALERT_DEDUP_WINDOW = 600
+    await database.ajouter_produit("u6", "Coffret", "Auchan", False, prix="10")
+    prod = {"url": "u6", "titre": "Coffret", "prix": "10", "image_url": ""}
+    await asyncio.gather(*(main._alerter(prod, "Auchan", "RESTOCK") for _ in range(10)))
+    assert alertes == ["RESTOCK"], alertes
+
+    # --- Envoi echoue : la reservation est rendue, la detection suivante re-alerte ---
+    alertes.clear()
+    await database.ajouter_produit("u7", "Coffret", "Auchan", False, prix="10")
+    prod7 = {"url": "u7", "titre": "Coffret", "prix": "10", "image_url": ""}
+
+    async def alerte_en_echec(prod, ens, t, chart_png=None):
+        return False
+    main.envoyer_alerte = alerte_en_echec
+    await main._alerter(prod7, "Auchan", "RESTOCK")
+    assert (await database.recuperer_produit("u7"))["derniere_alerte"] == 0
+    main.envoyer_alerte = fake_alerte
+    await main._alerter(prod7, "Auchan", "RESTOCK")
+    assert alertes == ["RESTOCK"]
+
+    await database.fermer()
     os.remove(chemin)
 
 

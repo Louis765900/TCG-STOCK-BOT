@@ -28,6 +28,13 @@ class CycleReport:
     mode: str = "recherche"
     timestamp: float = field(default_factory=time.time)
     stores: List[StoreReport] = field(default_factory=list)
+    duree_s: float = 0.0
+
+    def __post_init__(self):
+        self._debut = time.time()
+
+    def terminer(self):
+        self.duree_s = round(time.time() - self._debut, 2)
 
     def ajouter_store(self, store: StoreReport):
         self.stores.append(store)
@@ -41,7 +48,7 @@ class CycleReport:
         erreurs = [s.enseigne for s in self.stores if s.statut in ("timeout", "parser_error", "empty")]
         sains = [s.enseigne for s in self.stores if s.statut == "healthy"]
         lines = [
-            f"=== RAPPORT CYCLE {self.cycle_num} ({self.mode.upper()}) ===",
+            f"=== RAPPORT CYCLE {self.cycle_num} ({self.mode.upper()}, {self.duree_s}s) ===",
             f"Produits: {total_p} | Nouveautes: {total_n} | Restocks: {total_r} | Ruptures: {total_ru}",
             f"Sains: {', '.join(sains) or 'aucun'}",
             f"Bloques: {', '.join(bloques) or 'aucun'}",

@@ -69,16 +69,13 @@ async def _alerter(prod: dict, enseigne: str, type_alerte: str):
     url = prod.get("url", "")
     now = time.time()
 
-    row = await database.recuperer_produit(url)
-    if row is not None:
-        derniere = row["derniere_alerte"] or 0
-        if now - derniere < config.ALERT_DEDUP_WINDOW:
-            restant = int((config.ALERT_DEDUP_WINDOW - (now - derniere)) / 60)
-            logger.info(
-                "Alerte ignorée (doublon, ~%dmin restantes) [%s]: %s",
-                restant, enseigne, prod.get("titre", ""),
-            )
-            return
+    # Reservation ATOMIQUE du droit d'alerter (un seul UPDATE conditionnel) : deux
+    # detections simultanees du meme produit ne peuvent plus produire deux alertes.
+    ancienne = await database.reserver_alerte(url, now, config.ALERT_DEDUP_WINDOW)
+    if ancienne is None:
+        logger.info("Alerte ignorée (doublon, fenêtre %dmin) [%s]: %s",
+                    config.ALERT_DEDUP_WINDOW // 60, enseigne, prod.get("titre", ""))
+        return
 
     chart = None
     if config.ENABLE_PRICE_CHART:
@@ -86,8 +83,14 @@ async def _alerter(prod: dict, enseigne: str, type_alerte: str):
         chart = generer_graphique_prix(
             historique, prod.get("titre", ""), STORE_COLORS.get(enseigne, 0xE30613)
         )
-    await envoyer_alerte(prod, enseigne, type_alerte, chart_png=chart)
-    await database.enregistrer_alerte(url, now)
+    livree = await envoyer_alerte(prod, enseigne, type_alerte, chart_png=chart)
+    if livree is False:
+        # Envoi echoue : on rend la reservation, la prochaine detection pourra
+        # re-alerter au lieu d'etre etouffee par un faux "doublon".
+        await database.enregistrer_alerte(url, ancienne)
+        logger.error("Alerte NON livrée, réservation restituée [%s]: %s",
+                     enseigne, prod.get("titre", ""))
+        return
     _compteur_alertes["total"] += 1
 
 
@@ -102,11 +105,11 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int,
     """
     rapport = CycleReport(cycle_num=cycle_num, mode="recherche")
 
-    for enseigne, scraper in scrapers_map.items():
+    async def une_enseigne(enseigne, scraper):
         if _sante.en_veille(enseigne):
             logger.info("[%s] En veille (~%dmin restantes), cycle sauté.",
                         enseigne, _sante.minutes_restantes(enseigne))
-            continue
+            return
 
         store = StoreReport(enseigne=enseigne)
         try:
@@ -170,6 +173,10 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int,
         rapport.ajouter_store(store)
         await _logger_store(cycle_num, rapport.timestamp, store)
 
+    # Les enseignes sont independantes : on les traite EN PARALLELE (la duree du
+    # cycle devient celle de la plus lente, pas la somme de toutes).
+    await asyncio.gather(*(une_enseigne(e, sc) for e, sc in scrapers_map.items()))
+    rapport.terminer()
     return rapport
 
 
@@ -190,18 +197,19 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
     for p in tous_produits:
         par_enseigne.setdefault(p["enseigne"], []).append(p)
 
-    sem = asyncio.Semaphore(config.WATCHLIST_CONCURRENCY)
-
-    for enseigne, items in par_enseigne.items():
+    async def une_enseigne(enseigne, items):
         scraper = scrapers_map.get(enseigne)
         if not scraper:
             logger.warning("Pas de scraper pour '%s', ignoré.", enseigne)
-            continue
+            return
         if _sante.en_veille(enseigne):
             logger.info("[%s] En veille (~%dmin restantes), watchlist sautée.",
                         enseigne, _sante.minutes_restantes(enseigne))
-            continue
+            return
 
+        # Concurrence PAR enseigne : on reste poli avec chaque site tout en
+        # interrogeant toutes les enseignes en meme temps.
+        sem = asyncio.Semaphore(config.WATCHLIST_CONCURRENCY)
         store = StoreReport(enseigne=enseigne)
         store.produits_trouves = len(items)
         etat = {"blocages": 0, "stop": False}
@@ -250,6 +258,8 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
         rapport.ajouter_store(store)
         await _logger_store(cycle_num, rapport.timestamp, store)
 
+    await asyncio.gather(*(une_enseigne(e, it) for e, it in par_enseigne.items()))
+    rapport.terminer()
     return rapport
 
 
@@ -560,6 +570,12 @@ async def main_loop(stop_event=None):
                 await playwright_ctx.stop()
             except Exception:
                 pass
+        try:
+            from discord_webhook import fermer_session
+            await fermer_session()
+            await database.fermer()
+        except Exception:
+            pass
         if bot_task is not None:
             import discord_bot
             try:
