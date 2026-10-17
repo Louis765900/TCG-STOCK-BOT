@@ -40,7 +40,8 @@ Points faibles relevés :
 
 ## P1 — Discord
 
-- ⬜ **C5 — Routage des alertes** : un salon/webhook par enseigne ou catégorie, rôles par catégorie, mise en forme enrichie.
+- ✅ **C5 — Routage des alertes (par enseigne)** : `DISCORD_WEBHOOKS_BY_STORE` / `DISCORD_CHANNELS_BY_STORE`, repli sur le canal par défaut.
+  - ⬜ C5b : routage par catégorie de produit et rôles par catégorie (dépend de C11).
 - ⬜ **C6 — Commandes** : `/watch`, `/unwatch`, `/list`, `/stats`, filtres par enseigne.
 
 ## P1 — Enseignes françaises
@@ -89,3 +90,9 @@ Points faibles relevés :
 - `stats_enseignes()` agrège `cycle_logs` (taux de succès, durée moyenne, p95, dernier statut).
 - Commande `/status` (lecture seule, éphémère) ; ajoutée à `/help`.
 - Test : `test_observabilite` (13/13 au total). `.env.example` complété (MIN_CYCLE_GAP, RUPTURE_CONFIRMATIONS).
+
+### C5 — Routage Discord par enseigne
+- `config` : deux tables optionnelles (webhook / salon par enseigne) ; `.env.example` documenté.
+- `discord_webhook` : `webhook_pour()` / `canal_pour()` avec repli par défaut ; l'enseigne est transmise jusqu'au transport.
+- Test : `test_discord.test_routage_par_enseigne` (routage, repli, envoi sans webhook par défaut). 13/13.
+- Aucune configuration de production modifiée : comportement identique tant que les variables sont vides.

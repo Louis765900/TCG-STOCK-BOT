@@ -255,6 +255,14 @@ def _parse_shops(env_val: str, defaut: dict) -> dict:
 
 SHOPIFY_SHOPS = _parse_shops(os.getenv("SHOPIFY_SHOPS", ""), _DEFAULT_SHOPIFY)
 
+# Routage Discord par enseigne (optionnel) : une enseigne peut avoir son propre
+# webhook (mode webhook) ou son propre salon (mode bot). Les enseignes non listees
+# utilisent DISCORD_WEBHOOK_URL / DISCORD_CHANNEL_ID.
+#   DISCORD_WEBHOOKS_BY_STORE="Auchan=https://discord.com/api/webhooks/...,Leclerc=..."
+#   DISCORD_CHANNELS_BY_STORE="Auchan=123456789,Leclerc=987654321"
+DISCORD_WEBHOOKS_BY_STORE = _parse_shops(os.getenv("DISCORD_WEBHOOKS_BY_STORE", ""), {})
+DISCORD_CHANNELS_BY_STORE = _parse_shops(os.getenv("DISCORD_CHANNELS_BY_STORE", ""), {})
+
 # Boutiques WooCommerce (Store API publique /wp-json/wc/store/v1). Même principe
 # qu'au-dessus : un seul scraper générique (cf. scrapers/woocommerce.py). Vérifie
 # qu'une boutique répond sur /wp-json/wc/store/v1/products?search=pokemon avant de

@@ -6,6 +6,7 @@ import aiohttp
 import logging
 from config import (
     DISCORD_WEBHOOK_URL, DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, DISCORD_ALERT_ROLE_ID,
+    DISCORD_WEBHOOKS_BY_STORE, DISCORD_CHANNELS_BY_STORE,
 )
 from product_format import (
     STORE_COLORS,
@@ -31,6 +32,16 @@ _dernier_envoi = 0.0
 def _mode_bot() -> bool:
     """Vrai si un bot est configuré : il débloque les boutons et l'autobuy."""
     return bool(DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID)
+
+
+def webhook_pour(enseigne: str | None) -> str:
+    """Webhook de l'enseigne si configure, sinon le webhook par defaut."""
+    return DISCORD_WEBHOOKS_BY_STORE.get(enseigne or "", "") or DISCORD_WEBHOOK_URL
+
+
+def canal_pour(enseigne: str | None) -> str:
+    """Salon (mode bot) de l'enseigne si configure, sinon le salon par defaut."""
+    return DISCORD_CHANNELS_BY_STORE.get(enseigne or "", "") or DISCORD_CHANNEL_ID
 
 
 async def _post_avec_retry(session, url, *, headers=None, **kwargs) -> bool:
@@ -93,17 +104,18 @@ def _payload_multipart(payload: dict, chart_png: bytes) -> aiohttp.FormData:
     return form
 
 
-async def _envoyer_via_webhook(session, payload, chart_png) -> bool:
+async def _envoyer_via_webhook(session, payload, chart_png, enseigne=None) -> bool:
     """Transport historique : webhook simple (sans boutons)."""
+    url = webhook_pour(enseigne)
     if chart_png:
-        return await _post_avec_retry(session, DISCORD_WEBHOOK_URL,
+        return await _post_avec_retry(session, url,
                                       data=_payload_multipart(payload, chart_png))
-    return await _post_avec_retry(session, DISCORD_WEBHOOK_URL, json=payload)
+    return await _post_avec_retry(session, url, json=payload)
 
 
-async def _envoyer_via_bot(session, payload, chart_png) -> bool:
+async def _envoyer_via_bot(session, payload, chart_png, enseigne=None) -> bool:
     """Transport bot : poste dans un canal, supporte les boutons/composants."""
-    url = f"{DISCORD_API}/channels/{DISCORD_CHANNEL_ID}/messages"
+    url = f"{DISCORD_API}/channels/{canal_pour(enseigne)}/messages"
     headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
     if chart_png:
         return await _post_avec_retry(session, url, headers=headers,
@@ -122,7 +134,7 @@ async def envoyer_alerte(produit: dict, enseigne: str, type_alerte: str,
       - sinon          -> webhook classique (le lien reste dans l'embed).
     type_alerte: "NOUVEAUTE" ou "RESTOCK". Sérialisé + throttlé anti-429.
     """
-    if not (_mode_bot() or DISCORD_WEBHOOK_URL):
+    if not (_mode_bot() or webhook_pour(enseigne)):
         return True
 
     embed = build_alert_embed(produit, enseigne, type_alerte, with_chart=bool(chart_png))
@@ -138,7 +150,7 @@ async def envoyer_alerte(produit: dict, enseigne: str, type_alerte: str,
         if components:
             payload["components"] = components
 
-    return await _envoyer(payload, chart_png)
+    return await _envoyer(payload, chart_png, enseigne)
 
 
 async def envoyer_message(embed: dict):
@@ -195,10 +207,11 @@ async def fermer_session():
             pass
 
 
-async def _envoyer(payload: dict, chart_png: bytes | None = None) -> bool:
+async def _envoyer(payload: dict, chart_png: bytes | None = None,
+                   enseigne: str | None = None) -> bool:
     """Coeur d'envoi : throttle anti-429 + choix du transport (bot/webhook).
     Retourne True si le message est livre."""
-    if not (_mode_bot() or DISCORD_WEBHOOK_URL):
+    if not (_mode_bot() or webhook_pour(enseigne)):
         return True
 
     global _dernier_envoi
@@ -209,8 +222,8 @@ async def _envoyer(payload: dict, chart_png: bytes | None = None) -> bool:
         try:
             session = _session_partagee()
             if _mode_bot():
-                return bool(await _envoyer_via_bot(session, payload, chart_png))
-            return bool(await _envoyer_via_webhook(session, payload, chart_png))
+                return bool(await _envoyer_via_bot(session, payload, chart_png, enseigne))
+            return bool(await _envoyer_via_webhook(session, payload, chart_png, enseigne))
         except Exception as e:
             logger.error("Exception Discord: %s", e)
             return False

@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.join(_RACINE, "src"))
 sys.path.insert(0, os.path.join(_RACINE, "desktop"))
 
 import discord_webhook as dw
+_ENVOYER_REEL = dw._envoyer
 from discord_webhook import build_alert_embed, build_buy_components
 from product_format import normalize_product
 import discord_bot as db
@@ -64,7 +65,7 @@ def test():
     # Ping de rôle : présent si configuré, absent sinon
     captures = {}
 
-    async def fake(payload, chart_png=None):
+    async def fake(payload, chart_png=None, enseigne=None):
         captures.clear(); captures.update(payload)
 
     dw._envoyer = fake
@@ -85,8 +86,41 @@ def test():
 
     # Correctifs sécurité (SSRF /add + autorisation des commandes)
     test_securite_discord()
+    test_routage_par_enseigne()
 
 
 if __name__ == "__main__":
     test()
     print("OK")
+
+
+def test_routage_par_enseigne():
+    dw._envoyer = _ENVOYER_REEL
+    dw.DISCORD_WEBHOOK_URL = "https://defaut"
+    dw.DISCORD_WEBHOOKS_BY_STORE = {"Auchan": "https://auchan"}
+    dw.DISCORD_CHANNELS_BY_STORE = {"Auchan": "111"}
+    dw.DISCORD_CHANNEL_ID = "999"
+    assert dw.webhook_pour("Auchan") == "https://auchan"
+    assert dw.webhook_pour("Leclerc") == "https://defaut"      # repli par defaut
+    assert dw.webhook_pour(None) == "https://defaut"
+    assert dw.canal_pour("Auchan") == "111"
+    assert dw.canal_pour("Leclerc") == "999"
+
+    # Un webhook propre a l'enseigne suffit meme sans webhook par defaut.
+    dw.DISCORD_WEBHOOK_URL = ""
+    vus = []
+
+    async def faux_post(session, url, **kw):
+        vus.append(url)
+        return True
+    ancien_post, ancien_bot = dw._post_avec_retry, dw._mode_bot
+    dw._post_avec_retry, dw._mode_bot = faux_post, lambda: False
+    try:
+        prod = {"url": "https://x/p", "titre": "Coffret", "prix": "10", "en_stock": True}
+        assert asyncio.run(dw.envoyer_alerte(prod, "Auchan", "RESTOCK")) is True
+        assert vus == ["https://auchan"]
+        assert asyncio.run(dw.envoyer_alerte(prod, "Leclerc", "RESTOCK")) is True
+        assert vus == ["https://auchan"]      # rien a livrer pour Leclerc : pas d'envoi
+    finally:
+        dw._post_avec_retry, dw._mode_bot = ancien_post, ancien_bot
+        asyncio.run(dw.fermer_session())
