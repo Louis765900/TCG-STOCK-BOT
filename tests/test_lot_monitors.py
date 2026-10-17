@@ -301,13 +301,15 @@ async def _moteur():
     ligne = await database.recuperer_produit("https://s/p/a")
     assert ligne["introuvables"] == 5 and ligne["prochaine_verif"] == 0     # PAS disparu
     assert ligne["en_stock"] == 1                      # etat inchange, aucune fausse rupture
-    # Absence continue depuis > 1 h : disparu => marque indisponible, relecture espacee
+    # Absence continue depuis > 1 h : disparu => relecture espacee, MAIS etat de stock intact
+    # (disparaitre n'est pas une rupture constatee)
     db = await database._conn()
     await db.execute("UPDATE produits SET introuvable_depuis = ?", (time.time() - 2 * 3600,))
     await db.commit()
-    rap = await main.cycle_watchlist({"Boutique": ab}, 20)
+    await main.cycle_watchlist({"Boutique": ab}, 20)
     ligne = await database.recuperer_produit("https://s/p/a")
-    assert ligne["en_stock"] == 0 and ligne["prochaine_verif"] > time.time() + 3600
+    assert ligne["en_stock"] == 1 and ligne["prochaine_verif"] > time.time() + 3600
+    assert ligne["disparu_depuis"] > 0
     # ... et il n'est plus relu a chaque cycle
     appels = []
 
@@ -316,15 +318,39 @@ async def _moteur():
             appels.append(list(urls))
             return {u: ok(False) for u in urls}
     await main.cycle_watchlist({"Boutique": Compte()}, 21)
-    assert all("https://s/p/a" not in a for a in appels)
-    # Retour du produit EN STOCK a l'echeance => reinitialisation + vrai RESTOCK
+    assert appels == []                                # tous les produits sont en attente
+
+    # --- Retour apres disparition COURTE (2 h) ---
+    config.ALERT_DEDUP_WINDOW = 0
     await db.execute("UPDATE produits SET prochaine_verif = ?", (time.time() - 10,))
     await db.commit()
     alertes.clear()
-    Scraper.lot_a_fournir = {u: ok(True) for u in ("https://s/p/a", "https://s/p/b", "https://s/p/c")}
+    sc.lot_a_fournir = {u: ok(True) for u in ("https://s/p/a", "https://s/p/b", "https://s/p/c")}
     await main.cycle_watchlist({"Boutique": sc}, 22)
+    # a etait EN STOCK avant de disparaitre : pas de faux restock (trou technique de 2 h)
+    # b et c etaient en RUPTURE avant : leur retour en stock est une vraie transition
+    assert sorted(a[2] for a in alertes) == ["https://s/p/b", "https://s/p/c"], alertes
     ligne = await database.recuperer_produit("https://s/p/a")
     assert ligne["introuvables"] == 0 and ligne["prochaine_verif"] == 0 and ligne["en_stock"] == 1
+
+    # --- Retour apres disparition LONGUE (30 h) d'un produit qui etait en stock : alerte ---
+    await db.execute("UPDATE produits SET introuvables = 6, introuvable_depuis = ?, "
+                     "disparu_depuis = ?, prochaine_verif = ? WHERE url = 'https://s/p/a'",
+                     (time.time() - 30 * 3600, time.time() - 20 * 3600, time.time() - 10))
+    await db.commit()
+    alertes.clear()
+    await main.cycle_watchlist({"Boutique": sc}, 23)
+    assert [(a[1], a[2]) for a in alertes] == [("RESTOCK", "https://s/p/a")], alertes
+
+    # --- Retour en RUPTURE : jamais d'alerte ---
+    await db.execute("UPDATE produits SET introuvables = 6, introuvable_depuis = ?, "
+                     "prochaine_verif = ?, en_stock = 1 WHERE url = 'https://s/p/b'",
+                     (time.time() - 30 * 3600, time.time() - 10))
+    await db.commit()
+    alertes.clear()
+    sc.lot_a_fournir = {u: ok(False) for u in sc.lot_a_fournir}
+    await main.cycle_watchlist({"Boutique": sc}, 24)
+    assert alertes == []
 
     # --- Historique de prix sans doublons ---
     h0 = len(await database.recuperer_historique_prix("https://s/p/a"))

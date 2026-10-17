@@ -184,6 +184,11 @@ _SIGNAUX_FAIBLES_RAW = [
     "premium booster", "double pack", "the best",
 ]
 
+# Produit d'OCCASION / ABIME (fiche a part, ex. "[ENDOMMAGE] Pokemon - Coffret ...") : ce n'est
+# pas du neuf, jamais une alerte. Mots entiers, teste avant toute liste blanche.
+_ETAT_DEGRADE_RE = re.compile(
+    r"\b(?:endommag\w*|abim\w*|occasion|seconde main|damaged|reconditionn\w*|defectueu\w*)\b")
+
 # Numero de CARTE a l'unite, ex : "(BLK 105/086)", "152/217", "010/084". Un produit scelle
 # (display, ETB, coffret...) n'affiche jamais un numero de carte : c'est une carte seule.
 _NUMERO_CARTE_RE = re.compile(r"\b(?:[a-z]{1,3})?\d{2,3}\s?/\s?(?:[a-z]{1,3})?\d{2,3}\b")
@@ -234,6 +239,11 @@ def est_tcg_valide_local(titre: str, marque: str = "") -> bool:
     """
     t = _normaliser(f"{titre} {marque}").strip()
     if not t:
+        return False
+
+    # 0a. Produit endommage / d'occasion : pas du neuf, rejet immediat.
+    if _ETAT_DEGRADE_RE.search(t):
+        logger.debug("Rejete (etat degrade): %s", titre)
         return False
 
     # 0. Carte a l'unite (numero de carte present) : pas du scelle, rejet immediat.

@@ -68,7 +68,8 @@ async def initialiser_db():
             manuel INTEGER DEFAULT 0,
             introuvables INTEGER DEFAULT 0,
             introuvable_depuis REAL DEFAULT 0,
-            prochaine_verif REAL DEFAULT 0
+            prochaine_verif REAL DEFAULT 0,
+            disparu_depuis REAL DEFAULT 0
         )
     """)
     await db.execute("""
@@ -92,6 +93,12 @@ async def initialiser_db():
             prix_value REAL NOT NULL,
             en_stock INTEGER NOT NULL,
             timestamp REAL NOT NULL
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS meta (
+            cle TEXT PRIMARY KEY,
+            valeur TEXT NOT NULL
         )
     """)
     await db.execute(
@@ -124,7 +131,8 @@ async def _migrer_colonnes(db):
         logger.info("Migration: colonne 'manuel' ajoutée.")
     for col, ddl in (("introuvables", "INTEGER DEFAULT 0"),
                      ("introuvable_depuis", "REAL DEFAULT 0"),
-                     ("prochaine_verif", "REAL DEFAULT 0")):
+                     ("prochaine_verif", "REAL DEFAULT 0"),
+                     ("disparu_depuis", "REAL DEFAULT 0")):
         if col not in colonnes:
             await db.execute(f"ALTER TABLE produits ADD COLUMN {col} {ddl}")
             logger.info("Migration: colonne '%s' ajoutée.", col)
@@ -212,11 +220,19 @@ async def marquer_introuvable(url: str, maintenant: float | None = None) -> tupl
     return (row["introuvables"], row["introuvable_depuis"]) if row else (0, 0.0)
 
 
-async def marquer_disparu(url: str, prochaine_verif: float):
-    """Produit confirme disparu : marque indisponible et espace les relectures."""
+async def marquer_disparu(url: str, prochaine_verif: float, maintenant: float | None = None):
+    """Produit confirme disparu : espace les relectures.
+
+    L'etat de stock N'EST PAS modifie : une disparition du catalogue n'est pas une rupture
+    constatee. On conserve le dernier etat REEL connu pour qu'un retour soit compare a lui
+    (cf. main : pas de faux restock si le produit etait deja en stock avant de disparaitre).
+    """
+    now = maintenant if maintenant is not None else time.time()
     db = await _conn()
-    await db.execute("UPDATE produits SET en_stock = 0, prochaine_verif = ? WHERE url = ?",
-                     (prochaine_verif, url))
+    await db.execute(
+        "UPDATE produits SET prochaine_verif = ?, "
+        "disparu_depuis = CASE WHEN COALESCE(disparu_depuis, 0) = 0 THEN ? ELSE disparu_depuis END "
+        "WHERE url = ?", (prochaine_verif, now, url))
     await db.commit()
 
 
@@ -224,8 +240,8 @@ async def reinitialiser_introuvable(url: str):
     """Le produit a ete relu normalement : efface les constats d'absence."""
     db = await _conn()
     await db.execute("UPDATE produits SET introuvables = 0, introuvable_depuis = 0, "
-                     "prochaine_verif = 0 WHERE url = ? AND (COALESCE(introuvables, 0) > 0 "
-                     "OR COALESCE(prochaine_verif, 0) > 0)", (url,))
+                     "prochaine_verif = 0, disparu_depuis = 0 WHERE url = ? AND "
+                     "(COALESCE(introuvables, 0) > 0 OR COALESCE(prochaine_verif, 0) > 0)", (url,))
     await db.commit()
 
 
@@ -371,3 +387,18 @@ async def stats_enseignes(heures: float = 24.0) -> dict[str, dict]:
             "dernier_statut": lignes[-1][0],
         }
     return out
+
+
+async def lire_meta(cle: str) -> str | None:
+    """Petite memoire cle/valeur persistante (ex. mode de decouverte d'une enseigne)."""
+    db = await _conn()
+    async with db.execute("SELECT valeur FROM meta WHERE cle = ?", (cle,)) as cur:
+        row = await cur.fetchone()
+    return row["valeur"] if row else None
+
+
+async def ecrire_meta(cle: str, valeur: str):
+    db = await _conn()
+    await db.execute("INSERT INTO meta (cle, valeur) VALUES (?, ?) "
+                     "ON CONFLICT(cle) DO UPDATE SET valeur = excluded.valeur", (cle, valeur))
+    await db.commit()

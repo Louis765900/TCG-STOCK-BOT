@@ -24,7 +24,8 @@ def construire_tous(browser=None) -> dict:
     }
     for nom, domaine in config.SHOPIFY_SHOPS.items():
         scrapers[nom] = ShopifyScraper(nom, domaine, browser,
-                                         catalogue_complet=nom in config.SHOPIFY_CATALOGUE_COMPLET)
+                                         catalogue_complet=("*" in config.SHOPIFY_CATALOGUE_COMPLET
+                                                          or nom in config.SHOPIFY_CATALOGUE_COMPLET))
     for nom, domaine in config.WOO_SHOPS.items():
         scrapers[nom] = WooCommerceScraper(nom, domaine, browser)
     return scrapers

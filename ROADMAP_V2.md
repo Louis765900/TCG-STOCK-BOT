@@ -50,6 +50,7 @@ Points faibles relevés :
   - ⬜ C7b : rétablir Leclerc (à vérifier depuis la machine de production), nouvelles sources pour Cultura / La Grande Récré (avec C8).
 - 🔄 **C8 — Nouvelles enseignes FR** — partie 1 ✅ : Carrefour (rayons + fiches JSON-LD, direct vs marketplace, stock/rupture/inconnu) et Dracaugames (Shopify, catalogue complet). Fnac bloquée (DataDome), Micromania (Imperva), Maxi Toys (DataDome) écartées. Rapport : `docs/RAPPORT_C8.md`.
   - ✅ C8B — performances Shopify/Woo : lecture groupée (440 → 76 requêtes, 25,1 → 12,0 s par cycle sur 5 enseignes), variantes, produits disparus, confirmation de baisse de prix. Rapport : `docs/RAPPORT_C8B.md`.
+  - ✅ C8C — fiabilisation découverte/alertes Shopify/Woo : variantes vérifiées dès la découverte, règles uniformes, disparition ≠ rupture, adoption silencieuse du catalogue complet (défaut). Rapport : `docs/RAPPORT_C8C.md`.
   - ⬜ C8 partie 2 : boutiques Shopify/Woo FR supplémentaires, Joué Club / La Grande Récré (API à analyser).
 
 ## P2 — Magasins & géographie
@@ -127,3 +128,10 @@ Points faibles relevés :
 - Variantes d'état/langue ignorées pour le stock (faux restock « Endommagé » évité) ; Woo variable = inconnu.
 - Produits disparus (seuils combinés nb/durée, relecture espacée), baisse de prix confirmée sur 2 lectures, `N/A` n'écrase plus le dernier prix, historique de prix sans doublons.
 - Nouveaux réglages : `WATCHLIST_LOT`, `SHOPIFY_COLLECTIONS`, `SHOPIFY_VARIANTES_EXCLUES`, `PRIX_CONFIRMATIONS`, `DISPARU_*`. Outil : `tools/bench_monitors.py`. 18/18 tests.
+
+### C8C — Fiabilisation de la découverte et des alertes
+- Découverte par recherche vérifiée sur fiche (variantes), produits « endommagé / occasion » rejetés par le filtre, plafond de vérification 150.
+- Cohérence prouvée (découverte = catalogue = lot = fiche) pour Shopify et Woo.
+- Disparition d'un produit ≠ rupture : stock conservé, retour alerté seulement si pertinent (`REAPPARITION_ALERTE_HEURES`), ⚫ dans `/list`.
+- Adoption silencieuse (table `meta`) : activation du catalogue complet réelle sur LudiJeux/RelicTCG/Dracaugames = +499 produits, 0 alerte ; catalogue complet devient le défaut (`SHOPIFY_CATALOGUE_COMPLET=*`).
+- Migration ancienne base testée. 19/19 tests.

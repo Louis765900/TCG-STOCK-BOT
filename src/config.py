@@ -274,11 +274,18 @@ PRIX_CONFIRMATIONS = int(os.getenv("PRIX_CONFIRMATIONS", "2"))
 DISPARU_MIN_ECHECS = int(os.getenv("DISPARU_MIN_ECHECS", "5"))
 DISPARU_APRES_HEURES = float(os.getenv("DISPARU_APRES_HEURES", "6"))
 DISPARU_RECHECK_HEURES = float(os.getenv("DISPARU_RECHECK_HEURES", "6"))
+# Un produit disparu qui REVIENT en stock n'est annonce comme restock que si son absence a dure
+# au moins ce nombre d'heures (en dessous : simple indisponibilite technique, pas un evenement)
+# ou s'il etait deja en rupture avant de disparaitre (vraie transition).
+REAPPARITION_ALERTE_HEURES = float(os.getenv("REAPPARITION_ALERTE_HEURES", "24"))
 
 # Boutiques Shopify decouvertes par catalogue complet (/products.json : ruptures incluses)
 # plutot que par recherche predictive (qui masque les produits epuises).
+# "*" = toutes les boutiques Shopify (defaut). Le passage a ce mode est protege par un
+# amorcage silencieux (cf. main.cycle_recherche) : aucune fausse "nouveaute" sur un catalogue
+# deja en rayon. Vide (SHOPIFY_CATALOGUE_COMPLET=) = recherche predictive partout.
 SHOPIFY_CATALOGUE_COMPLET = {s.strip() for s in os.getenv(
-    "SHOPIFY_CATALOGUE_COMPLET", "Dracaugames").split(",") if s.strip()}
+    "SHOPIFY_CATALOGUE_COMPLET", "*").split(",") if s.strip()}
 
 # Collections Shopify a lire, par boutique (sinon detection automatique du scelle Pokemon /
 # One Piece). Format : SHOPIFY_COLLECTIONS="Dracaugames=coffrets-pokemon|decks-pokemon,Autre=h1".

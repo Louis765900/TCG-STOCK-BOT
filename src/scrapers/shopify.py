@@ -52,6 +52,7 @@ _EXCLUSION_EXPRESSIONS = ("deck box", "deckbox")
 _MAX_COLLECTIONS = 14
 _PAGES_PAR_COLLECTION = 6      # 6 x 250 = 1500 produits maxi par collection
 _COLLECTIONS_EN_PARALLELE = 3
+_VERIF_DECOUVERTE_MAX = 150    # fiches lues au plus par cycle de decouverte (recherche)
 
 
 def choisir_collections(collections: list[dict]) -> list[str]:
@@ -130,6 +131,7 @@ def _handle(url: str) -> str:
 class ShopifyScraper(BaseScraper):
 
     utilise_navigateur = False  # API JSON publique, aucun navigateur requis
+    mode_decouverte = "suggest"   # "collections" ou "suggest" (voir BaseScraper)
 
     def __init__(self, enseigne: str, domaine: str, browser, catalogue_complet: bool = False):
         super().__init__(enseigne, browser)
@@ -332,11 +334,55 @@ class ShopifyScraper(BaseScraper):
             "direct_links": {self.enseigne: url},
         }
 
+    # ---------- Verification des produits decouverts par la recherche predictive ----------
+    async def _verifier_decouverte(self, produits: list[dict]) -> list[dict]:
+        """Rend la decouverte par recherche aussi fiable que le catalogue et la fiche.
+
+        La recherche predictive ne donne qu'un `available` global (ses `variants` sont
+        vides) : un produit annonce "disponible" peut ne l'etre que par une variante
+        endommagee ou etrangere. Pour chaque produit JCC annonce disponible, on lit donc la
+        fiche (`.js`) et on applique la MEME regle que partout (`lire_variantes`).
+          - fiche illisible/bloquee => produit ECARTE ce cycle (jamais annonce sans preuve) ;
+          - produit indisponible    => prix "N/A" (prix de la recherche non verifiable par
+            variante ; le suivi le renseignera) ;
+          - les produits hors JCC ne sont pas verifies (le moteur les ecarte de toute facon).
+        """
+        sem = asyncio.Semaphore(3)
+        restantes = _VERIF_DECOUVERTE_MAX
+
+        async def verifier(p: dict) -> dict | None:
+            async with sem:
+                res = await self.scraper_produit(p["url"])
+            if res.get("status") != "ok":
+                logger.info("[%s] %s écarté (fiche: %s) : disponibilité non vérifiable.",
+                            self.enseigne, p["titre"], res.get("status"))
+                return None
+            return dict(p, en_stock=res["en_stock"], prix=res["prix"],
+                        image_url=p.get("image_url") or res.get("image_url", ""),
+                        ean=res.get("ean", ""))
+
+        sortie, taches = [], []
+        for p in produits:
+            if not est_tcg_valide_local(p["titre"], p.get("brand", "")):
+                sortie.append(p)
+            elif not p["en_stock"]:
+                sortie.append(dict(p, prix="N/A"))
+            elif restantes > 0:
+                restantes -= 1
+                taches.append(verifier(p))
+            else:
+                logger.warning("[%s] %s écarté : plafond de vérifications atteint (%d).",
+                               self.enseigne, p["titre"], _VERIF_DECOUVERTE_MAX)
+        sortie.extend(p for p in await asyncio.gather(*taches) if p is not None)
+        return sortie
+
     async def scraper_recherche(self) -> list[dict]:
         if self.catalogue_complet:
             produits = await self._recherche_catalogue()
             if produits is not None:
+                self.mode_decouverte = "collections"
                 return produits
+        self.mode_decouverte = "suggest"
         logger.info("[%s] Recherche Shopify %d mots-clés...",
                     self.enseigne, len(config.SEARCH_KEYWORDS))
         sem = asyncio.Semaphore(config.SEARCH_CONCURRENCY)
@@ -378,6 +424,7 @@ class ShopifyScraper(BaseScraper):
         else:
             self._last_status = "timeout"
 
+        produits = await self._verifier_decouverte(produits)
         logger.info("[%s] %d produits uniques (statut: %s).",
                     self.enseigne, len(produits), self._last_status)
         return produits

@@ -110,6 +110,7 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int,
     # tout premier lancement. Sinon, activer une enseigne inonderait Discord de "nouveautes"
     # qui ne sont que du catalogue deja en rayon.
     deja_connues = {p["enseigne"] for p in await database.recuperer_tous_produits()}
+    modes_connus = {e: await database.lire_meta(f"decouverte:{e}") for e in scrapers_map}
 
     async def une_enseigne(enseigne, scraper):
         if _sante.en_veille(enseigne):
@@ -124,6 +125,19 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int,
                         enseigne)
         try:
             produits = await scraper.scraper_recherche()
+
+            # Changement de mode de decouverte vers un mode PLUS COMPLET (ex. recherche
+            # predictive -> collections) : le catalogue decouvert est largement un stock deja
+            # en rayon, pas des nouveautes. Cycle d'adoption silencieux (une seule fois). Le
+            # repli inverse (collections -> recherche) ne change rien : ce que la recherche
+            # voit est un sous-ensemble de ce qui est deja connu.
+            mode = getattr(scraper, "mode_decouverte", None)
+            if (produits and mode == "collections" and modes_connus.get(enseigne) != "collections"
+                    and not silencieux):
+                silencieux = True
+                logger.warning("[%s] Passage à la découverte par collections : cycle d'adoption "
+                               "silencieux (%d produits, aucune alerte « nouveauté »).",
+                               enseigne, len(produits))
 
             if not produits:
                 statut = scraper._last_status if scraper._last_status != "ok" else "empty"
@@ -172,6 +186,9 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int,
                         logger.error("[%s] Erreur produit: %s", enseigne, inner_e)
 
                 store.terminer("healthy")
+                mode = getattr(scraper, "mode_decouverte", None)
+                if mode and (modes_connus.get(enseigne) is None or mode == "collections"):
+                    await database.ecrire_meta(f"decouverte:{enseigne}", mode)
 
         except Exception as e:
             store.terminer("timeout")
@@ -323,19 +340,19 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
 async def _constat_introuvable(enseigne: str, item: dict, store: StoreReport):
     """Un produit n'est PAS declare disparu sur un seul 404 (page en maintenance, produit
     depublie quelques minutes) : il faut DISPARU_MIN_ECHECS constats consecutifs ET une
-    absence continue d'au moins DISPARU_APRES_HEURES. Il est alors marque indisponible
-    (sans alerte) et n'est plus relu que toutes les DISPARU_RECHECK_HEURES ; s'il revient en
-    stock, c'est un vrai restock."""
+    absence continue d'au moins DISPARU_APRES_HEURES. Il est alors declare "disparu" : relu
+    seulement toutes les DISPARU_RECHECK_HEURES, SANS toucher a son dernier etat de stock connu
+    (une disparition n'est pas une rupture). Les regles de retour sont dans
+    `_traiter_resultat_watchlist` (REAPPARITION_ALERTE_HEURES)."""
     url = item["url"]
     n, depuis = await database.marquer_introuvable(url)
     if n >= config.DISPARU_MIN_ECHECS and time.time() - depuis >= config.DISPARU_APRES_HEURES * 3600:
         deja = bool(item.get("prochaine_verif"))
+        # L'etat de stock n'est PAS touche : disparaitre n'est pas une rupture constatee.
         await database.marquer_disparu(url, time.time() + config.DISPARU_RECHECK_HEURES * 3600)
         if not deja:
-            logger.warning("Produit disparu [%s] après %d constats / %.0f h: %s",
+            logger.warning("Produit disparu [%s] après %d constats / %.0f h (stock inchangé): %s",
                            enseigne, n, (time.time() - depuis) / 3600, item["titre"])
-        if item.get("en_stock"):
-            store.ruptures += 1
 
 
 async def _traiter_resultat_watchlist(enseigne: str, item: dict, res: dict, store: StoreReport):
@@ -380,6 +397,21 @@ async def _traiter_resultat_watchlist(enseigne: str, item: dict, res: dict, stor
     # Décision centralisée : on n'agit que sur une vraie transition d'état.
     # (Cette fonction n'est appelée que sur une lecture fiable, statut "ok".)
     action = evaluer_transition(ancien_stock, en_stock_actuel)
+
+    # Retour d'un produit declare "disparu". Son etat en base est le DERNIER ETAT REEL connu
+    # (la disparition ne l'a pas modifie) :
+    #   - il etait en rupture et revient en stock  -> vraie transition => RESTOCK (normal) ;
+    #   - il etait en stock et revient en stock    -> alerte seulement si l'absence a dure
+    #     au moins REAPPARITION_ALERTE_HEURES (sinon simple trou technique : aucune alerte) ;
+    #   - il revient en rupture                    -> chemin normal (rupture confirmee).
+    if item.get("prochaine_verif") and en_stock_actuel and ancien_stock:
+        depuis = item.get("introuvable_depuis") or item.get("disparu_depuis") or time.time()
+        if time.time() - depuis >= config.REAPPARITION_ALERTE_HEURES * 3600:
+            logger.info("RETOUR APRES DISPARITION [%s]: %s (absent %.0f h)", enseigne,
+                        item["titre"], (time.time() - depuis) / 3600)
+            action = RESTOCK
+        else:
+            logger.info("Retour sans alerte (absence courte) [%s]: %s", enseigne, item["titre"])
 
     if ancien_stock:
         # Une rupture n'est actee qu'apres N lectures "indisponible" consecutives.

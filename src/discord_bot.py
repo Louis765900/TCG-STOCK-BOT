@@ -78,10 +78,22 @@ def texte_aide() -> str:
     )
 
 
+def est_disparu(p: dict) -> bool:
+    """Produit declare disparu (introuvable de facon prolongee) : son dernier etat de stock
+    connu est conserve en base mais ne doit pas etre presente comme actuel."""
+    return (p.get("prochaine_verif") or 0) > 0
+
+
+def symbole_stock(p: dict) -> str:
+    if est_disparu(p):
+        return "⚫"          # disparu / introuvable
+    return "🟢" if p.get("en_stock") else "🔴"
+
+
 async def texte_stats() -> str:
     produits = await database.recuperer_tous_produits()
     total = len(produits)
-    en_stock = sum(1 for p in produits if p.get("en_stock"))
+    en_stock = sum(1 for p in produits if p.get("en_stock") and not est_disparu(p))
     par_enseigne: dict[str, int] = {}
     for p in produits:
         par_enseigne[p["enseigne"]] = par_enseigne.get(p["enseigne"], 0) + 1
@@ -118,7 +130,7 @@ async def texte_watchlist(limite: int = 15) -> str:
         return "📋 Watchlist vide. Ajoute un produit avec `/add <url>`."
     lignes = [f"**📋 Watchlist** ({len(produits)} produits)"]
     for p in produits[:limite]:
-        etat = "🟢" if p.get("en_stock") else "🔴"
+        etat = symbole_stock(p)
         lignes.append(f"{etat} [{p['enseigne']}] {p['titre'][:48]} — {p.get('prix', 'N/A')}")
     if len(produits) > limite:
         lignes.append(f"… et {len(produits) - limite} de plus")
@@ -212,7 +224,7 @@ async def texte_liste(page: int = 1, enseigne: str | None = None) -> str:
     debut = (page - 1) * _PAR_PAGE
     lignes = [f"**📋 Produits suivis** ({len(produits)}) — page {page}/{pages}"]
     for p in produits[debut:debut + _PAR_PAGE]:
-        etat = "🟢" if p.get("en_stock") else "🔴"
+        etat = symbole_stock(p)
         lignes.append(f"{etat} [{p['enseigne']}] {escape_markdown(p['titre'][:48])} — "
                       f"{p.get('prix', 'N/A')}")
     if page < pages:

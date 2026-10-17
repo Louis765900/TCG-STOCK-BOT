@@ -63,6 +63,11 @@ class BaseScraper(ABC):
     # navigateur (mode leger, ideal pour l'appli packagee). Voir main.py.
     utilise_navigateur: bool = True
 
+    # Mode de decouverte utilise au dernier cycle de recherche (ex. "collections" / "suggest").
+    # None = un seul mode possible. Quand une enseigne passe a un mode plus COMPLET, le moteur
+    # amorce en silence (pas de fausses "nouveautes" sur un catalogue deja en rayon).
+    mode_decouverte: str | None = None
+
     def __init__(self, enseigne: str, browser: Browser):
         self.enseigne = enseigne
         self.browser = browser
