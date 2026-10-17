@@ -8,7 +8,7 @@ import database
 import bot_state
 from filter_utils import est_tcg_valide, est_tcg_valide_local
 from discord_webhook import envoyer_alerte, envoyer_message
-from stock_state import evaluer_transition, RESTOCK, RUPTURE
+from stock_state import evaluer_transition, RESTOCK, RUPTURE, ConfirmationRupture, calculer_pause
 from store_health import StoreHealth
 from cycle_report import CycleReport, StoreReport
 from product_format import STORE_COLORS, parse_price, est_revendeur
@@ -31,6 +31,9 @@ logger = logging.getLogger("main")
 
 # Suivi de la santé des enseignes : met en veille celles qui échouent en boucle.
 _sante = StoreHealth(seuil=config.STORE_PAUSE_THRESHOLD, pause_s=config.STORE_PAUSE_DURATION)
+
+# Confirmation des ruptures (anti faux restock) : cf. stock_state.ConfirmationRupture.
+_confirmation = ConfirmationRupture(config.RUPTURE_CONFIRMATIONS)
 
 # Compteur d'alertes RÉELLEMENT envoyées sur Discord (≠ nombre de produits
 # découverts). Incrémenté seulement quand une alerte part vraiment.
@@ -306,6 +309,15 @@ async def _traiter_resultat_watchlist(enseigne: str, item: dict, res: dict, stor
     # (Cette fonction n'est appelée que sur une lecture fiable, statut "ok".)
     action = evaluer_transition(ancien_stock, en_stock_actuel)
 
+    if ancien_stock:
+        # Une rupture n'est actee qu'apres N lectures "indisponible" consecutives.
+        if not _confirmation.rupture_confirmee(url, en_stock_actuel) and not en_stock_actuel:
+            logger.info("Rupture à confirmer [%s]: %s", enseigne, item["titre"])
+            await database.mettre_a_jour_stock(url, True, prix_actuel)
+            return
+    else:
+        _confirmation.oublier(url)
+
     if action == RESTOCK:
         logger.info("RESTOCK WATCHLIST [%s]: %s", enseigne, item["titre"])
         await database.mettre_a_jour_stock(url, True, prix_actuel)
@@ -503,6 +515,7 @@ async def main_loop(stop_event=None):
                 logger.info("Arrêt demandé — sortie propre de la boucle.")
                 break
             cycle_num += 1
+            debut_cycle = time.time()
             logger.info("=== CYCLE %d ===", cycle_num)
 
             # Résilience : une erreur inattendue dans un cycle ne doit JAMAIS
@@ -555,8 +568,10 @@ async def main_loop(stop_event=None):
                 hb_restocks, hb_nouveautes, hb_cycles = 0, 0, 0
                 derniere_heartbeat = time.time()
 
-            duree = random.randint(config.MIN_SLEEP, config.MAX_SLEEP)
-            logger.info("Prochain cycle dans %ds.", duree)
+            duree = calculer_pause(time.time() - debut_cycle, config.MIN_SLEEP,
+                                   config.MAX_SLEEP, config.MIN_CYCLE_GAP, random.random())
+            logger.info("Cycle en %.1fs ; prochain cycle dans %.0fs.",
+                        time.time() - debut_cycle, duree)
             await _dormir(duree, stop_event)
     finally:
         bot_state.set_status(running=False)

@@ -31,8 +31,10 @@ Points faibles relevés :
   - ✅ C1.2 Cycles : enseignes en parallèle, durée de cycle mesurée (A1, A5)
   - ✅ C1.3 Anti-doublon atomique + restitution si l'envoi échoue + session HTTP Discord réutilisée (A3, A4)
   - ✅ C1.4 Tests : concurrence (10 détections → 1 alerte), échec d'envoi, parallélisme (12/12)
-- ⬜ **C2 — Détection rapide** : cadence par enseigne (watchlist chaude vs froide), priorisation des produits récemment en rupture/attendus, jitter par enseigne.
-- ⬜ **C3 — Robustesse des lectures** : confirmation à 2 lectures avant « rupture », métriques de santé par enseigne, persistance de l'état de santé.
+- ✅ **C2 — Cadence de détection** : pause calculée pour viser une *période* (`MIN_SLEEP`–`MAX_SLEEP` incluent la durée du cycle) + plancher `MIN_CYCLE_GAP`.
+  - ⬜ C2b (reporté) : boucles indépendantes par enseigne, watchlist chaude/froide.
+- ✅ **C3 — Robustesse des lectures** : rupture confirmée après `RUPTURE_CONFIRMATIONS` (=2) lectures « indisponible » consécutives → plus de faux restock après un glitch de page.
+  - ⬜ C3b (reporté) : persistance de l'état de santé des enseignes.
 - ⬜ **C4 — Observabilité** : commande `/status` détaillée, latence p50/p95 par enseigne, journal structuré.
 
 ## P1 — Discord
@@ -75,3 +77,9 @@ Points faibles relevés :
 - Tests : `test_cycles_paralleles` (nouveau), cas concurrence/échec dans `test_main_logic`.
 - Aucun scraper réel testé dans ce chantier (hors périmètre) ; aucune donnée utilisateur modifiée
   (schéma inchangé hors index).
+
+### C2 + C3 — Cadence & confirmation des ruptures
+- `stock_state.calculer_pause` : le temps passé à scraper est déduit de la pause (cadence stable).
+- `stock_state.ConfirmationRupture` : état mémoire ; tant que la rupture n'est pas confirmée,
+  la base reste « en stock » (aucune transition, aucun faux restock). Réglable via `.env`.
+- Tests : `test_stock_state` (confirmation, pause), `test_main_logic` (glitch isolé vs rupture réelle).

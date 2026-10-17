@@ -110,6 +110,25 @@ async def _scenario():
     await main._alerter(prod7, "Auchan", "RESTOCK")
     assert alertes == ["RESTOCK"]
 
+    # --- Faux "indisponible" isole : PAS de rupture actee, donc pas de faux restock ---
+    alertes.clear()
+    config.RUPTURE_CONFIRMATIONS = 2
+    main._confirmation.seuil = 2
+    await database.ajouter_produit("u8", "Coffret", "Auchan", True, prix="10")
+    st = Store()
+    await main._traiter_resultat_watchlist("Auchan", _item("u8", "10", True),
+                                           _res("ok", False, "10"), st)   # glitch
+    row = await database.recuperer_produit("u8")
+    assert row["en_stock"] == 1 and st.ruptures == 0
+    await main._traiter_resultat_watchlist("Auchan", _item("u8", "10", True),
+                                           _res("ok", True, "10"), st)    # retour normal
+    assert alertes == [] and st.restocks == 0
+    # Deux indisponibles consecutifs => rupture actee
+    for _ in range(2):
+        await main._traiter_resultat_watchlist("Auchan", _item("u8", "10", True),
+                                               _res("ok", False, "10"), st)
+    assert st.ruptures == 1 and (await database.recuperer_produit("u8"))["en_stock"] == 0
+
     await database.fermer()
     os.remove(chemin)
 

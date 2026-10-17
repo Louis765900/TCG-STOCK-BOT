@@ -107,6 +107,10 @@ else:
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 MIN_SLEEP = int(os.getenv("MIN_SLEEP", "60"))
 MAX_SLEEP = int(os.getenv("MAX_SLEEP", "180"))
+# Pause minimale entre deux cycles (s), meme si le cycle a depasse la periode cible.
+MIN_CYCLE_GAP = float(os.getenv("MIN_CYCLE_GAP", "5"))
+# Lectures "indisponible" consecutives necessaires pour acter une rupture (anti faux restock).
+RUPTURE_CONFIRMATIONS = int(os.getenv("RUPTURE_CONFIRMATIONS", "2"))
 USE_GEMINI_FILTER = os.getenv("USE_GEMINI_FILTER", "false").lower() in {"1", "true", "yes", "on"}
 REQUEST_TIMEOUT_MS = int(os.getenv("REQUEST_TIMEOUT_MS", "30000"))
 RUN_ONCE = os.getenv("RUN_ONCE", "false").lower() in {"1", "true", "yes", "on"}
