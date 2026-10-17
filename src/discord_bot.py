@@ -26,29 +26,14 @@ import database
 import config
 from config import DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, DISCORD_OWNER_ID
 from product_format import escape_markdown
+from store_domains import DOMAINES, domaines_connus, enseigne_pour_hote  # noqa: F401
 
 logger = logging.getLogger("discord_bot")
 
 _client: discord.Client | None = None
 
-# Reconnaissance de l'enseigne a partir du domaine (pour /add).
-DOMAINES = {
-    "auchan.fr": "Auchan",
-    "e.leclerc": "Leclerc",
-    "cultura.com": "Cultura",
-    "king-jouet.com": "KingJouet",
-    "smythstoys": "Smyths",
-    "lagranderecre.fr": "GrandeRecre",
-}
-
-
-def _domaines_connus() -> dict:
-    """Enseignes dediees + boutiques Shopify/WooCommerce configurees (domaine -> nom)."""
-    domaines = dict(DOMAINES)
-    for table in (config.SHOPIFY_SHOPS, config.WOO_SHOPS):
-        for nom, dom in table.items():
-            domaines[dom.lower().removeprefix("www.")] = nom
-    return domaines
+# Domaines des enseignes : source unique dans store_domains (partagee avec l'audit).
+_domaines_connus = domaines_connus
 
 
 def _enseigne_pour_url(url: str) -> str | None:
@@ -58,9 +43,7 @@ def _enseigne_pour_url(url: str) -> str | None:
     'https://evil.com/?x=auchan.fr' n'est PAS reconnu comme Auchan. Empeche
     qu'une URL arbitraire (SSRF) soit ajoutee a la watchlist puis requetee.
     """
-    host = (urlparse(url).hostname or "").lower()
-    if not host:
-        return None
+    return enseigne_pour_hote(urlparse(url).hostname or "")
     labels = host.split(".")
     for domaine, enseigne in _domaines_connus().items():
         d = domaine.lower()

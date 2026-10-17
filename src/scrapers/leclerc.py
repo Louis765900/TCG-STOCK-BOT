@@ -206,5 +206,6 @@ class LeclercScraper(BaseScraper):
                         "stock_quantity": p["stock_quantity"],
                     }
 
-        # Produit absent de l'API : on ne touche pas l'etat (evite une fausse rupture).
-        return {"status": "timeout", "en_stock": False, "prix": "N/A", "image_url": ""}
+        # Produit absent de l'API : on ne touche pas l'etat (evite une fausse rupture)
+        # et on ne le compte pas comme une erreur du site (statut dedie).
+        return {"status": "not_found", "en_stock": False, "prix": "N/A", "image_url": ""}

@@ -47,6 +47,7 @@ STORE_COLORS = {
 VENDEURS_DIRECTS = {
     "Leclerc": {"e.leclerc", "leclerc", "e leclerc", "espace culturel leclerc",
                 "espace culturel e.leclerc", "leclerc.com"},
+    "Cultura": {"cultura", "cultura.com"},
     "Auchan": {"auchan", "auchan.fr", "auchan retail france", "auchan direct"},
 }
 

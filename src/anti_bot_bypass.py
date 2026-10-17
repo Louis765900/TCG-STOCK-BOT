@@ -336,28 +336,60 @@ def charger_cookies(domain: str) -> Optional[list]:
 # DETECTION DE BLOCAGE
 # =============================================================================
 
+# Signatures FORTES : n'apparaissent que sur une vraie page de challenge/refus.
+_SIGNATURES_FORTES = {
+    "datadome": ["geo.captcha-delivery.com", "interstitial.captcha"],
+    "cloudflare": ["cf-challenge", "__cf_chl", "cf-mitigated",
+                   "checking your browser before", "just a moment..."],
+    "imperva": ["_incapsula_resource", "incapsula incident"],
+}
+
+# Signatures FAIBLES : de simples mentions (script anti-bot, reCAPTCHA d'un formulaire
+# newsletter, cookie de session...). Une VRAIE page produit peut les contenir : elles
+# ne comptent que si la page est vide de contenu (page de challenge typique).
 BLOCK_PATTERNS = {
-    "datadome": ["datadome", "geo.captcha-delivery.com", "interstitial.captcha"],
-    "cloudflare": ["cf-challenge", "challenge-platform", "__cf_chl", "cf-mitigated",
-                   "checking your browser before"],
-    "imperva": ["incapsula", "_incapsula_", "imperva"],
+    "datadome": ["datadome"],
+    "cloudflare": ["challenge-platform"],
+    "imperva": ["incapsula", "imperva"],
     "akamai": ["ak_bmsc", "_abck", "akamai bot manager"],
     "captcha": ["recaptcha", "hcaptcha", "g-recaptcha", "h-captcha", "funcaptcha", "geetest"],
-    "generic_bot": [
-        "verify you are human", "access denied", "you have been blocked",
-        "automated access", "please confirm you are human", "unusual traffic",
-        "detected unusual activity", "request blocked",
-    ],
 }
+
+# Phrases de refus generiques : decisives seulement sur une page courte.
+_PHRASES_REFUS = [
+    "verify you are human", "access denied", "you have been blocked",
+    "automated access", "please confirm you are human", "unusual traffic",
+    "detected unusual activity", "request blocked",
+]
+
+_TAILLE_PAGE_REELLE = 30000
+_MARQUEURS_CONTENU = ("application/ld+json", 'itemprop="price"', "itemprop='price'",
+                      'property="og:type" content="product"', "add-to-cart",
+                      "product-miniature", "product-thumbnail")
+
+
+def _page_avec_contenu(low: str) -> bool:
+    """Vrai si le HTML ressemble a une vraie page (grande ET riche en contenu produit)."""
+    return len(low) >= _TAILLE_PAGE_REELLE and any(m in low for m in _MARQUEURS_CONTENU)
 
 
 def detecter_type_blocage(html: Optional[str]) -> Optional[str]:
-    """Identifie l'anti-bot a partir du HTML, ou None si la page semble normale."""
+    """Identifie l'anti-bot a partir du HTML, ou None si la page semble normale.
+
+    Une page de challenge est COURTE et sans contenu produit ; une vraie page peut
+    simplement embarquer un script anti-bot ou un reCAPTCHA. On ne conclut donc a un
+    blocage sur une mention faible que si la page est vide de contenu.
+    """
     if not html or not html.strip():
         return "empty"
     low = html.lower()
-    # Une vraie page de resultats contient generalement beaucoup de contenu ;
-    # une page de challenge est courte. On exige aussi un motif connu.
+    for block_type, patterns in _SIGNATURES_FORTES.items():
+        if any(p in low for p in patterns):
+            return block_type
+    if len(low) < _TAILLE_PAGE_REELLE and any(p in low for p in _PHRASES_REFUS):
+        return "generic_bot"
+    if _page_avec_contenu(low):
+        return None
     for block_type, patterns in BLOCK_PATTERNS.items():
         if any(p in low for p in patterns):
             return block_type

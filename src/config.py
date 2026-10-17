@@ -274,7 +274,7 @@ WOO_SHOPS = _parse_shops(os.getenv("WOO_SHOPS", ""), _DEFAULT_WOO)
 
 # Gabarit d'URL de recherche par enseigne. {q} est remplacé par le mot-clé encodé.
 SEARCH_URL_TEMPLATES = {
-    "Cultura": "https://www.cultura.com/recherche.html?q={q}",
+    "Cultura": "https://www.cultura.com/search/results?q={q}",
     "Leclerc": "https://www.e.leclerc/recherche?q={q}",
     "KingJouet": "https://www.king-jouet.com/recherche.htm?mot={q}",
     "Smyths": "https://www.smythstoys.com/fr/fr-fr/recherche/?text={q}",

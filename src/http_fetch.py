@@ -10,6 +10,7 @@ http_get() renvoie le meme triplet que anti_bot_bypass.fetch_with_bypass :
   - ("<html>", "ok", None)        : page recuperee, semble normale
   - (None, "blocked", "<raison>") : protection / page vide
   - (None, "timeout", "<raison>") : timeout ou erreur reseau
+  - (None, "not_found", "http_404"): page absente (produit retire)
 Ainsi http_get est interchangeable avec le fetch navigateur.
 """
 
@@ -18,12 +19,15 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import logging
+import ipaddress
 import random
 from typing import Optional
+from urllib.parse import urljoin, urlsplit
 
 import aiohttp
 
 from anti_bot_bypass import detecter_type_blocage
+from store_domains import meme_site
 
 logger = logging.getLogger("http_fetch")
 
@@ -55,6 +59,10 @@ _ACCEPT_LANG = "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7"
 # Codes HTTP typiques d'un blocage anti-bot.
 _CODES_BLOQUES = {401, 403, 405, 429, 451, 503}
 
+# Page definitivement absente (produit retire) : ce n'est NI un blocage NI une erreur
+# du site. Statut dedie "not_found" pour ne pas fausser la sante de l'enseigne.
+_CODES_ABSENT = {404, 410}
+
 # Codes de throttling temporaire : on RÉESSAIE (avec attente) au lieu d'abandonner.
 # Beaucoup d'enseignes (ex. Leclerc) répondent 429/503 quand on enchaîne trop de
 # requêtes d'un coup, mais acceptent si on patiente une seconde.
@@ -80,13 +88,41 @@ def _headers_aiohttp(accept: str) -> dict:
     }
 
 
-async def _fetch_once(url: str, accept: str, extra: Optional[dict], timeout_s: float):
-    """
-    Un GET. Retourne (status_code, texte, headers_dict).
+class RedirectionRefusee(Exception):
+    """Une redirection pointe vers une destination non fiable (autre site, http, IP...)."""
 
-    curl_cffi (impersonation Chrome) en priorité ; repli aiohttp en cas
-    d'indisponibilité ou d'erreur.
-    """
+
+_REDIRECTIONS = {301, 302, 303, 307, 308}
+_MAX_REDIRECTIONS = 5
+
+
+def redirection_sure(origine: str, cible: str) -> bool:
+    """Une redirection est acceptee seulement si la cible reste sur le MEME site
+    (www.x.fr <-> x.fr, sous-domaines), en https, sans identifiants ni port exotique,
+    et n'est ni une adresse IP ni 'localhost'. Empeche qu'un site compromis ou un
+    open-redirect envoie le bot vers un reseau interne (SSRF) ou un domaine tiers."""
+    try:
+        o, c = urlsplit(origine), urlsplit(cible)
+        port = c.port
+    except ValueError:
+        return False
+    if c.scheme != "https" or not c.hostname or c.username or c.password:
+        return False
+    if port not in (None, 443):
+        return False
+    host = c.hostname.lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return False
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+        return False          # adresse IP litterale
+    except ValueError:
+        pass
+    return meme_site(o.hostname or "", host)
+
+
+async def _get_sans_redirection(url: str, accept: str, extra: Optional[dict], timeout_s: float):
+    """Un GET sans suivre les redirections. Retourne (status, texte, headers_dict)."""
     if _CURL_OK:
         try:
             entetes = {"Accept": accept, "Accept-Language": _ACCEPT_LANG}
@@ -94,7 +130,7 @@ async def _fetch_once(url: str, accept: str, extra: Optional[dict], timeout_s: f
                 entetes.update(extra)
             async with _CurlSession() as s:
                 r = await s.get(url, headers=entetes, impersonate=_IMPERSONATE,
-                                timeout=timeout_s, allow_redirects=True)
+                                timeout=timeout_s, allow_redirects=False)
                 return r.status_code, r.text, dict(r.headers)
         except Exception as e:  # repli silencieux sur aiohttp
             logger.debug("curl_cffi échec (%s) → repli aiohttp pour %s", e, url)
@@ -104,8 +140,32 @@ async def _fetch_once(url: str, accept: str, extra: Optional[dict], timeout_s: f
         h.update(extra)
     timeout = aiohttp.ClientTimeout(total=timeout_s)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(url, headers=h, allow_redirects=True) as resp:
+        async with session.get(url, headers=h, allow_redirects=False) as resp:
             return resp.status, await resp.text(errors="ignore"), dict(resp.headers)
+
+
+async def _fetch_once(url: str, accept: str, extra: Optional[dict], timeout_s: float):
+    """
+    Un GET avec suivi MANUEL des redirections (max 5), chaque saut etant valide par
+    `redirection_sure`. Retourne (status_code, texte, headers_dict) de la reponse
+    finale ; leve RedirectionRefusee si un saut sort du site ou du https.
+
+    curl_cffi (impersonation Chrome) en priorité ; repli aiohttp en cas
+    d'indisponibilité ou d'erreur.
+    """
+    courant = url
+    for _ in range(_MAX_REDIRECTIONS + 1):
+        status, texte, hdrs = await _get_sans_redirection(courant, accept, extra, timeout_s)
+        if status not in _REDIRECTIONS:
+            return status, texte, hdrs
+        cible = hdrs.get("Location") or hdrs.get("location") or ""
+        if not cible:
+            return status, texte, hdrs
+        cible = urljoin(courant, cible)
+        if not redirection_sure(url, cible):
+            raise RedirectionRefusee(f"{courant} -> {cible}")
+        courant = cible
+    raise RedirectionRefusee(f"trop de redirections depuis {url}")
 
 
 async def _fetch_avec_backoff(url: str, accept: str, extra: Optional[dict], timeout_s: float):
@@ -138,10 +198,15 @@ async def http_get(url: str, *, timeout_ms: int = 30000) -> tuple[Optional[str],
         status, html = await _fetch_avec_backoff(url, _ACCEPT_HTML, None, timeout_s)
     except asyncio.TimeoutError:
         return None, "timeout", "timeout"
+    except RedirectionRefusee as e:
+        logger.warning("Redirection refusée: %s", e)
+        return None, "blocked", "redirect_non_fiable"
     except Exception as e:
         logger.debug("Erreur HTTP %s: %s", url, e)
         return None, "timeout", "network_error"
 
+    if status in _CODES_ABSENT:
+        return None, "not_found", f"http_{status}"
     if status in _CODES_BLOQUES:
         return await _secours_html(url, f"http_{status}")
     if status >= 400 or html is None:
@@ -177,10 +242,15 @@ async def http_get_json(url: str, *, timeout_ms: int = 30000,
         status, texte = await _fetch_avec_backoff(url, _ACCEPT_JSON, headers, timeout_s)
     except asyncio.TimeoutError:
         return None, "timeout", "timeout"
+    except RedirectionRefusee as e:
+        logger.warning("Redirection refusée: %s", e)
+        return None, "blocked", "redirect_non_fiable"
     except Exception as e:
         logger.debug("Erreur HTTP JSON %s: %s", url, e)
         return None, "timeout", "network_error"
 
+    if status in _CODES_ABSENT:
+        return None, "not_found", f"http_{status}"
     if status in _CODES_BLOQUES:
         return await _secours_json(url, f"http_{status}")
     if status >= 400 or texte is None:

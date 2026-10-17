@@ -46,7 +46,8 @@ Points faibles relevés :
 
 ## P1 — Enseignes françaises
 
-- ⬜ **C7 — Audit scraper par scraper** (test réel de chaque enseigne, statut honnête dans le README).
+- ✅ **C7 — Audit scraper par scraper** : `tools/audit_scrapers.py` + `docs/AUDIT_SCRAPERS_V2.md`. Fonctionnels (testés en réel) : Auchan, LudiJeux, RelicTCG, CoinBarons. Défaillants : Leclerc (403), Cultura, King Jouet, Smyths, La Grande Récré.
+  - ⬜ C7b : rétablir Leclerc (à vérifier depuis la machine de production), nouvelles sources pour Cultura / La Grande Récré (avec C8).
 - ⬜ **C8 — Nouvelles enseignes FR** (Fnac, Carrefour, Micromania, Philibert…) — uniquement après test concluant.
 
 ## P2 — Magasins & géographie
@@ -103,3 +104,10 @@ Points faibles relevés :
 - Prise en compte par le moteur : la watchlist est relue en base à chaque cycle. **Correctif important** : colonne `manuel` (migration automatique, testée sur ancienne base) ; les produits ajoutés à la main ne sont plus purgés par le filtre JCC (le titre déduit de l'URL pouvait les faire supprimer en silence).
 - Tests : `test_watchlist_discord` (validation/SSRF, doublons, /unwatch, pagination, filtre, échappement Markdown, moteur : restock détecté sur un ajout manuel, produit retiré non surveillé). 14/14.
 - Limite connue : les commandes slash elles-mêmes (couche discord.py) ne sont pas testées contre l'API Discord réelle ; seule la logique sous-jacente et `est_autorise` le sont. Le titre d'un ajout manuel est déduit de l'URL (pas de lecture de la fiche à l'ajout).
+
+### C7 — Audit et fiabilisation des scrapers
+- Audit réel (17/10/2026) de 9 enseignes : 4 fonctionnelles, 5 défaillantes (détail et limites dans `docs/AUDIT_SCRAPERS_V2.md`).
+- Sécurité : redirections HTTP validées saut par saut (même site, https, pas d'IP/localhost) ; domaines centralisés dans `store_domains.py`.
+- Fiabilité : détection de blocage sans faux positifs (RelicTCG était classé « captcha » à tort) ; statut `not_found` ; stock prudent (Woo non achetable à 0 € ne compte plus, Auchan sans signal = non en stock) ; parseur Cultura réécrit (non exploitable en pratique) ; vendeurs directs Cultura.
+- Outils : `tools/audit_scrapers.py` (lecture seule, sans Discord, sans proxy payant), `scrapers/registry.py`.
+- Tests : `test_detection_blocage`, `test_scrapers_parsing` (16/16 au total). Aucun envoi Discord pendant les tests réseau.

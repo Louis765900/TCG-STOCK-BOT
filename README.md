@@ -137,6 +137,7 @@ Discord → ton salon → ⚙️ *Modifier le salon* → *Intégrations* → *We
 ```bash
 python tests/run_all.py            # suite complète (doit afficher 11/11)
 python tools/diag_scrapers.py      # sonde live des enseignes
+python tools/audit_scrapers.py     # audit complet (qualité, stock, cohérence) — voir docs/AUDIT_SCRAPERS_V2.md
 python tools/diag_proxy.py         # teste le filet de secours proxy
 ```
 

@@ -60,12 +60,19 @@ class WooCommerceScraper(BaseScraper):
             return None
         images = p.get("images") or []
         image = images[0].get("src", "") if images else ""
+        prix = self._prix(p.get("prices") or {})
+        if prix != "N/A" and float(prix) <= 0:
+            prix = "N/A"   # prix 0 = non renseigne, jamais un vrai prix
+        # "En stock" seulement si le produit est reellement ACHETABLE : la Store API
+        # annonce parfois is_in_stock=true pour un produit non achetable a 0 EUR
+        # ("Lire la suite") -> faux restock si on ne regarde que is_in_stock.
+        achetable = bool(p.get("is_purchasable", True)) and prix != "N/A"
         return {
             "url": url,
             "titre": nom,
-            "prix": self._prix(p.get("prices") or {}),
+            "prix": prix,
             "image_url": image,
-            "en_stock": bool(p.get("is_in_stock")),
+            "en_stock": bool(p.get("is_in_stock")) and achetable,
             "brand": "",  # Woo Store API n'expose pas de marque fiable
             "seller": self.enseigne,
             "country": "FR",
@@ -134,7 +141,7 @@ class WooCommerceScraper(BaseScraper):
             f"{self.api}?slug={quote_plus(slug)}", timeout_ms=config.REQUEST_TIMEOUT_MS)
         if statut != "ok" or not isinstance(data, list) or not data:
             # statut != ok OU produit introuvable : on ne touche pas l'état.
-            return {"status": statut if statut != "ok" else "timeout",
+            return {"status": statut if statut != "ok" else "not_found",
                     "en_stock": False, "prix": "N/A", "image_url": ""}
 
         prod = self._produit(data[0]) or {}

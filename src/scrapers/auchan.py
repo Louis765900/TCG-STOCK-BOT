@@ -79,7 +79,10 @@ class AuchanScraper(BaseScraper):
                 elif stock_quantity is not None:
                     en_stock = stock_quantity > 0
                 else:
-                    en_stock = True
+                    # Aucun signal de stock sur la tuile : on ne presume PAS "en stock"
+                    # (faux "nouveaute en stock"). La fiche produit, lue par la
+                    # watchlist, tranchera et declenchera un restock fiable si besoin.
+                    en_stock = False
 
                 # Références
                 reference = article.get("data-id", "")

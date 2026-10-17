@@ -14,14 +14,7 @@ from cycle_report import CycleReport, StoreReport
 from product_format import STORE_COLORS, parse_price, est_revendeur
 from price_chart import generer_graphique_prix
 
-from scrapers.cultura import CulturaScraper
-from scrapers.leclerc import LeclercScraper
-from scrapers.kingjouet import KingJouetScraper
-from scrapers.smyths import SmythsScraper
-from scrapers.granderecre import GrandeRecreScraper
-from scrapers.auchan import AuchanScraper
-from scrapers.shopify import ShopifyScraper
-from scrapers.woocommerce import WooCommerceScraper
+from scrapers.registry import construire_tous
 
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
@@ -458,18 +451,7 @@ async def main_loop(stop_event=None):
     # Scrapers construits SANS navigateur d'abord ; on ne lance Playwright que si une
     # enseigne activée en a réellement besoin (sites blindés). Les 5 sources par
     # défaut sont en HTTP/JSON → aucun navigateur (mode léger, idéal appli packagée).
-    tous_scrapers = {
-        "Cultura": CulturaScraper(None),
-        "Leclerc": LeclercScraper(None),
-        "KingJouet": KingJouetScraper(None),
-        "Smyths": SmythsScraper(None),
-        "GrandeRecre": GrandeRecreScraper(None),
-        "Auchan": AuchanScraper(None),
-    }
-    for nom, domaine in config.SHOPIFY_SHOPS.items():
-        tous_scrapers[nom] = ShopifyScraper(nom, domaine, None)
-    for nom, domaine in config.WOO_SHOPS.items():
-        tous_scrapers[nom] = WooCommerceScraper(nom, domaine, None)
+    tous_scrapers = construire_tous(None)
     scrapers_map = {k: v for k, v in tous_scrapers.items() if k in config.ENABLED_STORES}
     ignorees = [k for k in tous_scrapers if k not in scrapers_map]
     logger.info("Enseignes actives : %s%s", ", ".join(scrapers_map) or "AUCUNE",
