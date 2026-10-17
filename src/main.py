@@ -101,6 +101,12 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int,
     """
     rapport = CycleReport(cycle_num=cycle_num, mode="recherche")
 
+    # Amorcage PAR ENSEIGNE : une enseigne qui n'a encore aucun produit en base (nouvelle
+    # enseigne ajoutee a une installation existante) est decouverte en silence, comme au
+    # tout premier lancement. Sinon, activer une enseigne inonderait Discord de "nouveautes"
+    # qui ne sont que du catalogue deja en rayon.
+    deja_connues = {p["enseigne"] for p in await database.recuperer_tous_produits()}
+
     async def une_enseigne(enseigne, scraper):
         if _sante.en_veille(enseigne):
             logger.info("[%s] En veille (~%dmin restantes), cycle sauté.",
@@ -108,6 +114,10 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int,
             return
 
         store = StoreReport(enseigne=enseigne)
+        silencieux = amorcage or enseigne not in deja_connues
+        if silencieux and not amorcage:
+            logger.info("[%s] Première découverte de cette enseigne : amorçage silencieux.",
+                        enseigne)
         try:
             produits = await scraper.scraper_recherche()
 
@@ -141,7 +151,7 @@ async def cycle_recherche(scrapers_map: dict, cycle_num: int,
                                 image_url=prod.get("image_url", ""),
                             )
                             store.nouveautes += 1
-                            if en_stock and not amorcage:
+                            if en_stock and not silencieux:
                                 await _alerter(prod, enseigne, "NOUVEAUTE")
                         else:
                             # Produit déjà connu : la recherche ne fait QUE rafraîchir
@@ -205,7 +215,8 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
 
         # Concurrence PAR enseigne : on reste poli avec chaque site tout en
         # interrogeant toutes les enseignes en meme temps.
-        sem = asyncio.Semaphore(config.WATCHLIST_CONCURRENCY)
+        sem = asyncio.Semaphore(
+            min(config.WATCHLIST_CONCURRENCY, getattr(scraper, "CONCURRENCE_WATCHLIST", 99)))
         store = StoreReport(enseigne=enseigne)
         store.produits_trouves = len(items)
         etat = {"blocages": 0, "stop": False}
@@ -214,7 +225,13 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
             async with sem:
                 if etat["stop"]:
                     return item, {"status": "skipped"}
-                res = await scraper.scraper_produit(item["url"])
+                try:
+                    res = await scraper.scraper_produit(item["url"])
+                except Exception as e:
+                    # Un bug de parsing sur UNE fiche ne doit pas faire perdre tout le
+                    # cycle de l'enseigne : on la traite comme "inconnue" (etat inchange).
+                    logger.error("[%s] Exception scraper_produit %s: %s", enseigne, item["url"], e)
+                    res = {"status": "inconnu"}
             if res["status"] in ("blocked", "timeout"):
                 etat["blocages"] += 1
                 if etat["blocages"] >= config.MAX_BLOCKS_BEFORE_SKIP:
@@ -228,12 +245,17 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
 
         resultats = await asyncio.gather(*(verifier(i) for i in items))
 
-        ok, erreurs = 0, 0
+        ok, erreurs, inconnus = 0, 0, 0
         for item, res in resultats:
             statut = res.get("status")
             if statut != "ok":
                 if statut in ("blocked", "timeout"):
                     erreurs += 1
+                elif statut == "inconnu":
+                    # Fiche lue mais stock indeterminable : on ne touche PAS a l'etat
+                    # (ni restock ni rupture), mais on le compte pour detecter une
+                    # enseigne dont la page a change (tout "inconnu" != "healthy").
+                    inconnus += 1
                 continue
             ok += 1
             try:
@@ -243,7 +265,7 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
 
         if etat["stop"] or (erreurs and erreurs >= len(items) // 2 and ok == 0):
             store.terminer("blocked")
-        elif erreurs > ok:
+        elif erreurs + inconnus > ok:
             store.terminer("parser_error")
         else:
             store.terminer("healthy")

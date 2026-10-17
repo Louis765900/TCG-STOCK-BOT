@@ -17,6 +17,7 @@ from urllib.parse import quote_plus
 import config
 from scrapers.base_scraper import BaseScraper
 from http_fetch import http_get_json
+from filter_utils import est_tcg_valide_local
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +29,14 @@ class ShopifyScraper(BaseScraper):
 
     utilise_navigateur = False  # API JSON publique, aucun navigateur requis
 
-    def __init__(self, enseigne: str, domaine: str, browser):
+    def __init__(self, enseigne: str, domaine: str, browser, catalogue_complet: bool = False):
         super().__init__(enseigne, browser)
         self.domaine = domaine
         self.base = f"https://www.{domaine}"
+        # Decouverte par /products.json (catalogue COMPLET, ruptures comprises) au lieu de la
+        # recherche predictive, qui masque les produits indisponibles : sans cela, un produit
+        # epuise n'est jamais connu du bot et son retour en stock n'est pas suivi finement.
+        self.catalogue_complet = catalogue_complet
 
     # parse_page est exigée par la classe de base mais inutile (on passe par l'API).
     def parse_page(self, soup) -> list[dict]:
@@ -78,7 +83,81 @@ class ShopifyScraper(BaseScraper):
             "direct_links": {self.enseigne: url},
         }
 
+    # ---------- Decouverte par catalogue complet : /products.json ----------
+    def _produit_depuis_catalogue(self, p: dict) -> dict | None:
+        handle, titre = p.get("handle"), p.get("title")
+        if not (handle and titre):
+            return None
+        variantes = p.get("variants") or []
+        dispo = [v for v in variantes if v.get("available")]
+        pool = dispo or variantes
+
+        def prix_v(v):
+            try:
+                return float(v.get("price"))
+            except (TypeError, ValueError):
+                return float("inf")
+        prix = "N/A"
+        if pool:
+            meilleur = min(prix_v(v) for v in pool)
+            if 0 < meilleur < float("inf"):
+                prix = f"{meilleur:.2f}"
+        images = p.get("images") or []
+        url = f"{self.base}/products/{handle}"
+        ean = next((str(v.get("barcode")) for v in pool
+                    if str(v.get("barcode") or "").isdigit() and len(str(v.get("barcode"))) in (8, 12, 13)), "")
+        return {
+            "url": url,
+            "titre": titre,
+            "prix": prix,
+            "image_url": self._https(images[0] if images else ""),
+            "en_stock": bool(dispo),
+            "ean": ean,
+            "brand": p.get("vendor", ""),
+            "seller": self.enseigne,
+            "country": "FR",
+            "direct_links": {self.enseigne: url},
+        }
+
+    async def _recherche_catalogue(self) -> list[dict] | None:
+        """Catalogue complet filtre JCC. None => endpoint indisponible (repli recherche)."""
+        produits, statuts = [], []
+        for page in range(1, 21):              # 20 x 250 = 5000 articles maximum
+            data, statut, blocage = await http_get_json(
+                f"{self.base}/products.json?limit=250&page={page}",
+                timeout_ms=config.REQUEST_TIMEOUT_MS)
+            statuts.append(statut)
+            articles = data.get("products") if isinstance(data, dict) else None
+            if statut != "ok" or not isinstance(articles, list):
+                if page == 1:
+                    logger.info("[%s] /products.json indisponible (%s) -> recherche classique.",
+                                self.enseigne, blocage or statut)
+                    self._statut_catalogue = statut
+                    return None
+                break                          # echec en cours de route : on garde le partiel
+            for a in articles:
+                try:
+                    # Les "cartes a l'unite" (product_type) ne sont pas du scelle.
+                    type_produit = (a.get("product_type") or "").lower()
+                    if any(m in type_produit for m in ("unité", "unite", "single")):
+                        continue
+                    prod = self._produit_depuis_catalogue(a)
+                    if prod and est_tcg_valide_local(prod["titre"], prod["brand"]):
+                        produits.append(prod)
+                except Exception as e:
+                    logger.debug("[%s] article ignoré: %s", self.enseigne, e)
+            if len(articles) < 250:
+                break
+            await asyncio.sleep(0.5)
+        self._last_status = "ok"
+        logger.info("[%s] Catalogue complet : %d produits JCC.", self.enseigne, len(produits))
+        return produits
+
     async def scraper_recherche(self) -> list[dict]:
+        if self.catalogue_complet:
+            produits = await self._recherche_catalogue()
+            if produits is not None:
+                return produits
         logger.info("[%s] Recherche Shopify %d mots-clés...",
                     self.enseigne, len(config.SEARCH_KEYWORDS))
         sem = asyncio.Semaphore(config.SEARCH_CONCURRENCY)

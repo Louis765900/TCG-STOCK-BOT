@@ -4,6 +4,6 @@
   "DISCORD_CHANNEL_ID": "",
   "DISCORD_WEBHOOK_URL": "https://discord.com/api/webhooks/....",
   "DISCORD_ALERT_ROLE_ID": "",
-  "ENABLED_STORES": "Auchan,Leclerc,LudiJeux,RelicTCG,CoinBarons",
+  "ENABLED_STORES": "Auchan,Leclerc,Carrefour,LudiJeux,RelicTCG,CoinBarons,Dracaugames",
   "MASQUER_REVENDEURS": "false"
 }

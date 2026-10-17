@@ -184,6 +184,10 @@ _SIGNAUX_FAIBLES_RAW = [
     "premium booster", "double pack", "the best",
 ]
 
+# Numero de CARTE a l'unite, ex : "(BLK 105/086)", "152/217", "010/084". Un produit scelle
+# (display, ETB, coffret...) n'affiche jamais un numero de carte : c'est une carte seule.
+_NUMERO_CARTE_RE = re.compile(r"\b(?:[a-z]{1,3})?\d{2,3}\s?/\s?(?:[a-z]{1,3})?\d{2,3}\b")
+
 # Code de set Pokémon, ex : EV05, ME02, EB12, EB12.5, SL12
 _SET_CODE_RE = re.compile(r"\b(ev|me|eb|sl|xy)\s?\d{1,2}(\.\d)?\b")
 # Code de set One Piece, ex : OP01, OP-09, PRB01 (très spécifiques au jeu de cartes).
@@ -230,6 +234,11 @@ def est_tcg_valide_local(titre: str, marque: str = "") -> bool:
     """
     t = _normaliser(f"{titre} {marque}").strip()
     if not t:
+        return False
+
+    # 0. Carte a l'unite (numero de carte present) : pas du scelle, rejet immediat.
+    if _NUMERO_CARTE_RE.search(t):
+        logger.debug("Rejete (carte a l'unite): %s", titre)
         return False
 
     # 1. Liste blanche (produits voulus malgré un mot exclu) -> prime sur tout.

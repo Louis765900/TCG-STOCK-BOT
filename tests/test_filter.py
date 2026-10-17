@@ -44,7 +44,22 @@ CAS = [
 ]
 
 
+def test_cartes_a_l_unite():
+    from filter_utils import est_tcg_valide_local as ok
+    # Cartes seules (numero de carte) : rejetees meme avec set + "Carte Pokémon"
+    assert not ok("Crapustule (BLK 105/086) - Foudre Noire - Carte Pokémon EV10.5")
+    assert not ok("Pokémon - ME05 Nuit Noire - Scolocendre (PBL 010/084)")
+    assert not ok("Mega Dracolosse ex (ASC 152/217) - ME02.5 Héros Transcendants")
+    assert not ok("Branette - TG07/TG30 - Origine Perdue - EB11")      # Galerie des dresseurs
+    # Produits scelles : toujours valides
+    assert ok("Pokémon - Display de 36 Boosters ME04 - Méga-Évolution : Chaos Ascendant")
+    assert ok("Pokémon - Bundle de 6 Boosters ME04 : Chaos Ascendant")
+    assert ok("Coffret Dresseur d'Élite Pokémon EV05")
+    assert ok("Tripack - EV06 - Écarlate et Violet : Mascarade Crépusculaire - Vrombrotor")
+    assert ok("Cartes Pokémon Pokébox Méga-Ectoplasma ex ASMODEE")
+
 def test():
+    test_cartes_a_l_unite()
     erreurs = []
     for titre, marque, attendu in CAS:
         if v(titre, marque) != attendu:

@@ -161,6 +161,8 @@ def normaliser_url(url: str) -> str | None:
         return None
     query = urlencode([(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
                        if not k.lower().startswith(_PARAMS_SUIVI)])
+    if p.hostname.lower().endswith("carrefour.fr"):
+        query = ""   # ?s=<id vendeur> designe une offre marketplace : meme produit, meme fiche
     return urlunsplit(("https", p.hostname.lower(), p.path, query, ""))
 
 

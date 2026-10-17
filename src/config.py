@@ -230,7 +230,7 @@ SEARCH_CONCURRENCY = int(os.getenv("SEARCH_CONCURRENCY", "3"))
 # minutes pour zero resultat. Pour en reactiver un, ajoute son nom ici via .env :
 #   ENABLED_STORES=Auchan,Leclerc,Cultura
 ENABLED_STORES = [s.strip() for s in os.getenv(
-    "ENABLED_STORES", "Auchan,Leclerc,LudiJeux,RelicTCG,CoinBarons").split(",") if s.strip()]
+    "ENABLED_STORES", "Auchan,Leclerc,Carrefour,LudiJeux,RelicTCG,CoinBarons,Dracaugames").split(",") if s.strip()]
 
 # Boutiques Shopify (API JSON publique, pas d'anti-bot) : {nom: domaine}. Un seul
 # scraper générique les gère toutes (cf. scrapers/shopify.py). Pour en ajouter une,
@@ -240,6 +240,7 @@ ENABLED_STORES = [s.strip() for s in os.getenv(
 _DEFAULT_SHOPIFY = {
     "LudiJeux": "ludijeux.fr",
     "RelicTCG": "relictcg.com",
+    "Dracaugames": "dracaugames.com",
 }
 def _parse_shops(env_val: str, defaut: dict) -> dict:
     """Parse "Nom=domaine,Nom2=domaine2" depuis .env, sinon renvoie le défaut."""
@@ -254,6 +255,15 @@ def _parse_shops(env_val: str, defaut: dict) -> dict:
 
 
 SHOPIFY_SHOPS = _parse_shops(os.getenv("SHOPIFY_SHOPS", ""), _DEFAULT_SHOPIFY)
+
+# Carrefour : compter aussi le stock des marchands tiers (marketplace) comme "en stock" ?
+# Par defaut NON : seul le stock vendu/expedie par Carrefour declenche une alerte.
+CARREFOUR_INCLURE_MARKETPLACE = os.getenv("CARREFOUR_INCLURE_MARKETPLACE", "false").lower() in {"1", "true", "yes", "on"}
+
+# Boutiques Shopify decouvertes par catalogue complet (/products.json : ruptures incluses)
+# plutot que par recherche predictive (qui masque les produits epuises).
+SHOPIFY_CATALOGUE_COMPLET = {s.strip() for s in os.getenv(
+    "SHOPIFY_CATALOGUE_COMPLET", "Dracaugames").split(",") if s.strip()}
 
 # Routage Discord par enseigne (optionnel) : une enseigne peut avoir son propre
 # webhook (mode webhook) ou son propre salon (mode bot). Les enseignes non listees

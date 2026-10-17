@@ -6,6 +6,7 @@ from scrapers.kingjouet import KingJouetScraper
 from scrapers.smyths import SmythsScraper
 from scrapers.granderecre import GrandeRecreScraper
 from scrapers.auchan import AuchanScraper
+from scrapers.carrefour import CarrefourScraper
 from scrapers.shopify import ShopifyScraper
 from scrapers.woocommerce import WooCommerceScraper
 
@@ -19,9 +20,11 @@ def construire_tous(browser=None) -> dict:
         "Smyths": SmythsScraper(browser),
         "GrandeRecre": GrandeRecreScraper(browser),
         "Auchan": AuchanScraper(browser),
+        "Carrefour": CarrefourScraper(browser),
     }
     for nom, domaine in config.SHOPIFY_SHOPS.items():
-        scrapers[nom] = ShopifyScraper(nom, domaine, browser)
+        scrapers[nom] = ShopifyScraper(nom, domaine, browser,
+                                         catalogue_complet=nom in config.SHOPIFY_CATALOGUE_COMPLET)
     for nom, domaine in config.WOO_SHOPS.items():
         scrapers[nom] = WooCommerceScraper(nom, domaine, browser)
     return scrapers

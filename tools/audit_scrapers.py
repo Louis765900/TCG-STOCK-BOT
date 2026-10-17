@@ -56,6 +56,7 @@ def analyser_produits(enseigne: str, produits: list[dict]) -> dict:
     urls = [p.get("url", "") for p in produits]
     mauvaises_urls, prix_ok, prix_aberrants, valides, en_stock = [], 0, [], 0, 0
     univers = 0
+    en_stock_sans_prix = 0
     sans_titre = 0
     for p in produits:
         u = urlsplit(p.get("url", ""))
@@ -74,6 +75,8 @@ def analyser_produits(enseigne: str, produits: list[dict]) -> dict:
             univers += 1
         if p.get("en_stock"):
             en_stock += 1
+            if _prix_float(p.get("prix")) is None:
+                en_stock_sans_prix += 1
     return {
         "total": n,
         "doublons": n - len(set(urls)),
@@ -85,6 +88,7 @@ def analyser_produits(enseigne: str, produits: list[dict]) -> dict:
         "valides_jcc": valides,
         "univers_cible": univers,   # titres citant Pokemon / One Piece (pertinence de la recherche)
         "en_stock": en_stock,
+        "en_stock_sans_prix": en_stock_sans_prix,   # alertable mais sans prix = anomalie
     }
 
 
@@ -126,9 +130,11 @@ def verdict(r: dict) -> tuple[str, list[str]]:
     if q["nb_urls_invalides"]:
         partiel = True
         raisons.append(f"{q['nb_urls_invalides']} URL hors domaine/https")
-    if q["prix_aberrants"] or (q["total"] and q["avec_prix"] / q["total"] < 0.7):
+    # Un prix absent n'est un defaut que pour un produit "en stock" (un produit en rupture ou
+    # vendu seulement par des tiers peut legitimement n'avoir aucun prix chez l'enseigne).
+    if q["prix_aberrants"] or q.get("en_stock_sans_prix", 0):
         partiel = True
-        raisons.append("prix manquants ou aberrants")
+        raisons.append("prix aberrants ou produits en stock sans prix")
     if q["doublons"]:
         raisons.append(f"{q['doublons']} doublons")
     fiches = r["fiches"]

@@ -48,7 +48,8 @@ Points faibles relevés :
 
 - ✅ **C7 — Audit scraper par scraper** : `tools/audit_scrapers.py` + `docs/AUDIT_SCRAPERS_V2.md`. Fonctionnels (testés en réel) : Auchan, LudiJeux, RelicTCG, CoinBarons. Défaillants : Leclerc (403), Cultura, King Jouet, Smyths, La Grande Récré.
   - ⬜ C7b : rétablir Leclerc (à vérifier depuis la machine de production), nouvelles sources pour Cultura / La Grande Récré (avec C8).
-- ⬜ **C8 — Nouvelles enseignes FR** (Fnac, Carrefour, Micromania, Philibert…) — uniquement après test concluant.
+- 🔄 **C8 — Nouvelles enseignes FR** — partie 1 ✅ : Carrefour (rayons + fiches JSON-LD, direct vs marketplace, stock/rupture/inconnu) et Dracaugames (Shopify, catalogue complet). Fnac bloquée (DataDome), Micromania (Imperva), Maxi Toys (DataDome) écartées. Rapport : `docs/RAPPORT_C8.md`.
+  - ⬜ C8 partie 2 : boutiques Shopify/Woo FR supplémentaires, Joué Club / La Grande Récré (API à analyser).
 
 ## P2 — Magasins & géographie
 
@@ -111,3 +112,9 @@ Points faibles relevés :
 - Fiabilité : détection de blocage sans faux positifs (RelicTCG était classé « captcha » à tort) ; statut `not_found` ; stock prudent (Woo non achetable à 0 € ne compte plus, Auchan sans signal = non en stock) ; parseur Cultura réécrit (non exploitable en pratique) ; vendeurs directs Cultura.
 - Outils : `tools/audit_scrapers.py` (lecture seule, sans Discord, sans proxy payant), `scrapers/registry.py`.
 - Tests : `test_detection_blocage`, `test_scrapers_parsing` (16/16 au total). Aucun envoi Discord pendant les tests réseau.
+
+### C8 (partie 1) — Carrefour et Dracaugames
+- Carrefour : découverte par rayon « jeux classiques » filtré par licence (recherche challengée Cloudflare, non utilisée), stock lu sur la fiche (offres par vendeur), marketplace jamais comptée comme stock Carrefour (option), « Drive » traité non disponible en ligne, statut `inconnu` jamais présumé en stock.
+- Dracaugames : mode « catalogue complet » Shopify (`/products.json`) qui suit aussi les ruptures ; cartes à l'unité exclues (filtre global : numéro de carte).
+- Moteur : amorçage silencieux par enseigne (nouvelle enseigne ≠ inondation Discord), statut `inconnu` compté en `parser_error`, concurrence par scraper, exception de fiche isolée.
+- Défauts `ENABLED_STORES` étendus (installations existantes inchangées). 17/17 tests ; bout en bout réel sans alerte.

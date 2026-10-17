@@ -11,6 +11,7 @@ DOMAINES = {
     "king-jouet.com": "KingJouet",
     "smythstoys": "Smyths",
     "lagranderecre.fr": "GrandeRecre",
+    "carrefour.fr": "Carrefour",
 }
 
 

@@ -95,6 +95,51 @@ def test_cultura():
     assert lire(prix="abc")["prix"] == "N/A"
 
 
+def test_shopify_catalogue():
+    import asyncio
+    import scrapers.shopify as shop
+    def art(handle, titre, dispo, type_="Pokémon", prix="59.90", barcode=""):
+        return {"handle": handle, "title": titre, "product_type": type_, "vendor": "Boutique",
+                "images": [{"src": "https://cdn/x.png"}],
+                "variants": [{"available": dispo, "price": prix, "barcode": barcode}]}
+    pages = {1: [art("etb", "Pokémon - Coffret Dresseur d'Élite ME05", True, barcode="0820650557446"),
+                 art("display", "Pokémon - Display de 36 Boosters ME04", False, prix="239.90"),
+                 art("carte", "Mesmérella (WHT 042/086) - Flamme Blanche", True, "Cartes à l'Unité"),
+                 art("carte2", "Pokémon Ninjask", True, "Cartes à l'unité"),
+                 art("mug", "Mug Pikachu", True, "Merch")]}
+    appels = []
+
+    async def faux(url, timeout_ms=0, headers=None):
+        appels.append(url)
+        return {"products": pages.get(int(url.rsplit("page=", 1)[1]), [])}, "ok", None
+    reel = shop.http_get_json
+    shop.http_get_json = faux
+    try:
+        sc = ShopifyScraper("Boutique", "x.fr", None, catalogue_complet=True)
+        prods = asyncio.run(sc.scraper_recherche())
+    finally:
+        shop.http_get_json = reel
+    assert {p["url"].rsplit("/", 1)[1] for p in prods} == {"etb", "display"}   # ni cartes seules ni mug
+    etb = next(p for p in prods if p["url"].endswith("/etb"))
+    assert etb["en_stock"] is True and etb["prix"] == "59.90" and etb["ean"] == "0820650557446"
+    disp = next(p for p in prods if p["url"].endswith("/display"))
+    assert disp["en_stock"] is False and disp["prix"] == "239.90"    # rupture SUIVIE, prix connu
+    assert len(appels) == 1 and sc._last_status == "ok"
+
+    # /products.json indisponible => repli sur la recherche classique (aucune exception)
+    async def indispo(url, timeout_ms=0, headers=None):
+        if "products.json" in url:
+            return None, "not_found", "http_404"
+        return {"resources": {"results": {"products": [
+            {"handle": "z", "title": "Pokémon Display EV02", "price": "10", "available": True}]}}}, "ok", None
+    shop.http_get_json = indispo
+    try:
+        prods = asyncio.run(ShopifyScraper("B", "x.fr", None, catalogue_complet=True).scraper_recherche())
+    finally:
+        shop.http_get_json = reel
+    assert prods and prods[0]["url"].endswith("/products/z")
+
+
 def test_audit_outils():
     prods = [
         {"url": "https://www.auchan.fr/a", "titre": "Pokémon Display ME04", "prix": "216", "en_stock": True},
@@ -134,6 +179,7 @@ def test():
     test_shopify()
     test_auchan_stock()
     test_cultura()
+    test_shopify_catalogue()
     test_audit_outils()
 
 

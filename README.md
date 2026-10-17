@@ -94,7 +94,7 @@ Discord → ton salon → ⚙️ *Modifier le salon* → *Intégrations* → *We
 | `DISCORD_WEBHOOK_URL` | Où envoyer les alertes (mode simple) | *(obligatoire\*)* |
 | `DISCORD_BOT_TOKEN` + `DISCORD_CHANNEL_ID` | Mode **bot** : débloque les boutons cliquables | — |
 | `DISCORD_ALERT_ROLE_ID` | Rôle à mentionner (notification instantanée) | — |
-| `ENABLED_STORES` | Enseignes surveillées (séparées par virgules) | Auchan,Leclerc,LudiJeux,RelicTCG,CoinBarons |
+| `ENABLED_STORES` | Enseignes surveillées (séparées par virgules) | Auchan,Leclerc,Carrefour,LudiJeux,RelicTCG,CoinBarons,Dracaugames |
 | `MIN_SLEEP` / `MAX_SLEEP` | Pause (s) entre deux cycles | 60 / 180 |
 | `DEAL_DROP_PERCENT` | Seuil d'alerte « baisse de prix » (%) | 15 |
 | `MASQUER_REVENDEURS` | N'alerter que sur les vendeurs officiels | false |
@@ -122,8 +122,8 @@ Discord → ton salon → ⚙️ *Modifier le salon* → *Intégrations* → *We
 
 | Type | Mécanisme | Exemples |
 |---|---|---|
-| Grande distribution | API JSON interne | Leclerc, Auchan |
-| Boutiques **Shopify** | API publique `suggest.json` | LudiJeux, RelicTCG |
+| Grande distribution | API JSON interne / HTML + JSON-LD | Leclerc, Auchan, Carrefour |
+| Boutiques **Shopify** | API publique (`suggest.json`, ou `products.json` complet) | LudiJeux, RelicTCG, Dracaugames |
 | Boutiques **WooCommerce** | Store API `wc/store/v1` | CoinBarons |
 
 > Ajouter une boutique Shopify/WooCommerce ne demande **pas de code** : vérifie-la avec

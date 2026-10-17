@@ -26,6 +26,8 @@ STORE_LABELS = {
     "LudiJeux": "LudiJeux",
     "RelicTCG": "Relic TCG",
     "CoinBarons": "Le Coin des Barons",
+    "Dracaugames": "Dracaugames",
+    "Carrefour": "Carrefour",
 }
 
 STORE_COLORS = {
@@ -39,6 +41,8 @@ STORE_COLORS = {
     "LudiJeux": 0x2ECC71,
     "RelicTCG": 0x9B59B6,
     "CoinBarons": 0xE67E22,
+    "Dracaugames": 0xE74C3C,
+    "Carrefour": 0x004E9F,
 }
 
 # Vendeurs "directs" (l'enseigne elle-même) sur les places de marché. Tout autre
@@ -48,6 +52,7 @@ VENDEURS_DIRECTS = {
     "Leclerc": {"e.leclerc", "leclerc", "e leclerc", "espace culturel leclerc",
                 "espace culturel e.leclerc", "leclerc.com"},
     "Cultura": {"cultura", "cultura.com"},
+    "Carrefour": {"carrefour", "carrefour livraison", "carrefour drive", "carrefour.fr"},
     "Auchan": {"auchan", "auchan.fr", "auchan retail france", "auchan direct"},
 }
 

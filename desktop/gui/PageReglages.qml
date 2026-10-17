@@ -82,7 +82,7 @@ Item {
                     Text { text: "Surveillance"; color: Theme.textHi
                            font { family: Theme.font; pixelSize: Theme.fsHead; weight: Font.DemiBold } }
                     Field { id: fStores; Layout.fillWidth: true; label: "Enseignes actives (séparées par des virgules)"
-                            placeholder: "Auchan,Leclerc,LudiJeux,RelicTCG,CoinBarons" }
+                            placeholder: "Auchan,Leclerc,Carrefour,LudiJeux,RelicTCG,CoinBarons,Dracaugames" }
                     RowLayout {
                         Layout.fillWidth: true; spacing: Theme.gap
                         Field { id: fMin; Layout.fillWidth: true; label: "Pause min (s)"; placeholder: "60" }
