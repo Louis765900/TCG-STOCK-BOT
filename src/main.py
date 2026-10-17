@@ -398,20 +398,24 @@ async def _traiter_resultat_watchlist(enseigne: str, item: dict, res: dict, stor
     # (Cette fonction n'est appelée que sur une lecture fiable, statut "ok".)
     action = evaluer_transition(ancien_stock, en_stock_actuel)
 
-    # Retour d'un produit declare "disparu". Son etat en base est le DERNIER ETAT REEL connu
-    # (la disparition ne l'a pas modifie) :
-    #   - il etait en rupture et revient en stock  -> vraie transition => RESTOCK (normal) ;
-    #   - il etait en stock et revient en stock    -> alerte seulement si l'absence a dure
-    #     au moins REAPPARITION_ALERTE_HEURES (sinon simple trou technique : aucune alerte) ;
-    #   - il revient en rupture                    -> chemin normal (rupture confirmee).
-    if item.get("prochaine_verif") and en_stock_actuel and ancien_stock:
+    # REAPPARITION d'une fiche declaree "disparue" != CHANGEMENT DE DISPONIBILITE.
+    # Son stock en base est le DERNIER ETAT REEL connu (la disparition ne l'a pas modifie) ;
+    # seule la comparaison de cet etat avec la lecture actuelle dit s'il y a eu un changement :
+    #   - rupture connue  -> en stock : vraie transition => RESTOCK (chemin normal) ;
+    #   - en stock connu  -> en stock : AUCUN changement de disponibilite => jamais RESTOCK.
+    #     Simple reapparition : comptee, journalisee, et signalee par une alerte distincte
+    #     "REAPPARITION" uniquement si ALERTER_REAPPARITION et absence >= REAPPARITION_ALERTE_HEURES ;
+    #   - en stock connu  -> rupture : chemin normal (rupture confirmee, sans alerte).
+    if item.get("prochaine_verif"):
+        store.reapparitions += 1
         depuis = item.get("introuvable_depuis") or item.get("disparu_depuis") or time.time()
-        if time.time() - depuis >= config.REAPPARITION_ALERTE_HEURES * 3600:
-            logger.info("RETOUR APRES DISPARITION [%s]: %s (absent %.0f h)", enseigne,
-                        item["titre"], (time.time() - depuis) / 3600)
-            action = RESTOCK
-        else:
-            logger.info("Retour sans alerte (absence courte) [%s]: %s", enseigne, item["titre"])
+        absence_h = (time.time() - depuis) / 3600
+        logger.info("RÉAPPARITION [%s]: %s (absent %.0f h, stock connu %s -> lu %s)", enseigne,
+                    item["titre"], absence_h, "en stock" if ancien_stock else "rupture",
+                    "en stock" if en_stock_actuel else "rupture")
+        if (en_stock_actuel and ancien_stock and config.ALERTER_REAPPARITION
+                and absence_h >= config.REAPPARITION_ALERTE_HEURES):
+            await _alerter(prod_alerte, enseigne, "REAPPARITION")
 
     if ancien_stock:
         # Une rupture n'est actee qu'apres N lectures "indisponible" consecutives.

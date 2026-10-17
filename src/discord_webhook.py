@@ -239,6 +239,7 @@ def build_alert_embed(produit: dict, enseigne: str, type_alerte: str,
         "NOUVEAUTE": "Nouveau",
         "RESTOCK": "Restock",
         "DEAL": "Baisse de prix",
+        "REAPPARITION": "Réapparu",
     }.get(type_alerte, type_alerte)
     price_value = product["price"]
     if product["discount"]:

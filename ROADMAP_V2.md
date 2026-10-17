@@ -51,6 +51,7 @@ Points faibles relevés :
 - 🔄 **C8 — Nouvelles enseignes FR** — partie 1 ✅ : Carrefour (rayons + fiches JSON-LD, direct vs marketplace, stock/rupture/inconnu) et Dracaugames (Shopify, catalogue complet). Fnac bloquée (DataDome), Micromania (Imperva), Maxi Toys (DataDome) écartées. Rapport : `docs/RAPPORT_C8.md`.
   - ✅ C8B — performances Shopify/Woo : lecture groupée (440 → 76 requêtes, 25,1 → 12,0 s par cycle sur 5 enseignes), variantes, produits disparus, confirmation de baisse de prix. Rapport : `docs/RAPPORT_C8B.md`.
   - ✅ C8C — fiabilisation découverte/alertes Shopify/Woo : variantes vérifiées dès la découverte, règles uniformes, disparition ≠ rupture, adoption silencieuse du catalogue complet (défaut). Rapport : `docs/RAPPORT_C8C.md`.
+  - ✅ C8C.1 — validation des alertes : réapparition ≠ restock, cause de l'alerte manquante élucidée (carte à l'unité), tests d'intégration sur boutiques simulées validés par mutations. Rapport : `docs/RAPPORT_C8C1.md`.
   - ⬜ C8 partie 2 : boutiques Shopify/Woo FR supplémentaires, Joué Club / La Grande Récré (API à analyser).
 
 ## P2 — Magasins & géographie
@@ -135,3 +136,8 @@ Points faibles relevés :
 - Disparition d'un produit ≠ rupture : stock conservé, retour alerté seulement si pertinent (`REAPPARITION_ALERTE_HEURES`), ⚫ dans `/list`.
 - Adoption silencieuse (table `meta`) : activation du catalogue complet réelle sur LudiJeux/RelicTCG/Dracaugames = +499 produits, 0 alerte ; catalogue complet devient le défaut (`SHOPIFY_CATALOGUE_COMPLET=*`).
 - Migration ancienne base testée. 19/19 tests.
+
+### C8C.1 — Validation des alertes
+- Réapparition d'une fiche ≠ changement de disponibilité : plus de RESTOCK ; alerte distincte « Réapparu » optionnelle (`ALERTER_REAPPARITION`, désactivée par défaut) ; compteur `reapparitions` par enseigne.
+- Alerte « manquante » de C8C : cible du test = carte à l'unité, correctement absente du mode collections. Fuite réelle corrigée : les codes de carte `(DRI 007)` passaient le filtre.
+- `tests/test_integration_alertes.py` : boutiques Shopify et Woo simulées, liste exacte des alertes à chaque étape ; 8 mutations du code toutes détectées. 20/20 tests.

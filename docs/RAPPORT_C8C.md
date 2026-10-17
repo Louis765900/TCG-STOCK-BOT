@@ -3,6 +3,12 @@
 Vérifications réelles du 17 octobre 2026 (une IP, sans proxy, base temporaire, envoi Discord
 remplacé par un enregistreur : **0 alerte réelle**). Tests : 19/19.
 
+> **Correctif (C8C.1)** : le point 3 ci-dessous décrivait un retour « en stock avant / en stock
+> après, absence ≥ 24 h » comme un RESTOCK. C'était une erreur de conception : une réapparition
+> n'est pas un changement de disponibilité. Elle n'envoie plus de RESTOCK (voir
+> `docs/RAPPORT_C8C1.md`). De même, l'échec de l'alerte attendue dans le « scénario combiné »
+> vient d'une carte à l'unité mal choisie comme cible, pas d'un défaut du moteur d'alertes.
+
 ## Risques identifiés puis traités
 
 | # | Risque (constat) | Traitement |

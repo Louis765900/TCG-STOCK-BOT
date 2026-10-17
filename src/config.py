@@ -274,10 +274,12 @@ PRIX_CONFIRMATIONS = int(os.getenv("PRIX_CONFIRMATIONS", "2"))
 DISPARU_MIN_ECHECS = int(os.getenv("DISPARU_MIN_ECHECS", "5"))
 DISPARU_APRES_HEURES = float(os.getenv("DISPARU_APRES_HEURES", "6"))
 DISPARU_RECHECK_HEURES = float(os.getenv("DISPARU_RECHECK_HEURES", "6"))
-# Un produit disparu qui REVIENT en stock n'est annonce comme restock que si son absence a dure
-# au moins ce nombre d'heures (en dessous : simple indisponibilite technique, pas un evenement)
-# ou s'il etait deja en rupture avant de disparaitre (vraie transition).
+# Absence minimale (heures) pour qu'une reapparition soit signalee (si ALERTER_REAPPARITION).
 REAPPARITION_ALERTE_HEURES = float(os.getenv("REAPPARITION_ALERTE_HEURES", "24"))
+# Une REAPPARITION (fiche de retour apres disparition, stock inchange) n'est PAS un restock.
+# Par defaut elle n'envoie aucune alerte ; avec ALERTER_REAPPARITION=true elle envoie une alerte
+# distincte "Reapparu" (jamais "Restock"), seulement apres REAPPARITION_ALERTE_HEURES d'absence.
+ALERTER_REAPPARITION = os.getenv("ALERTER_REAPPARITION", "false").lower() in {"1", "true", "yes", "on"}
 
 # Boutiques Shopify decouvertes par catalogue complet (/products.json : ruptures incluses)
 # plutot que par recherche predictive (qui masque les produits epuises).

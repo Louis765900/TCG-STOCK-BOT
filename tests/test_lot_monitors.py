@@ -333,14 +333,25 @@ async def _moteur():
     ligne = await database.recuperer_produit("https://s/p/a")
     assert ligne["introuvables"] == 0 and ligne["prochaine_verif"] == 0 and ligne["en_stock"] == 1
 
-    # --- Retour apres disparition LONGUE (30 h) d'un produit qui etait en stock : alerte ---
-    await db.execute("UPDATE produits SET introuvables = 6, introuvable_depuis = ?, "
-                     "disparu_depuis = ?, prochaine_verif = ? WHERE url = 'https://s/p/a'",
-                     (time.time() - 30 * 3600, time.time() - 20 * 3600, time.time() - 10))
-    await db.commit()
-    alertes.clear()
-    await main.cycle_watchlist({"Boutique": sc}, 23)
-    assert [(a[1], a[2]) for a in alertes] == [("RESTOCK", "https://s/p/a")], alertes
+    # --- Retour apres disparition LONGUE (30 h) d'un produit qui etait en stock ---
+    # Reapparition != changement de disponibilite : jamais de RESTOCK ; alerte distincte
+    # "REAPPARITION" uniquement si l'option est activee.
+    async def retour_long():
+        await db.execute("UPDATE produits SET introuvables = 6, introuvable_depuis = ?, "
+                         "disparu_depuis = ?, prochaine_verif = ?, en_stock = 1 "
+                         "WHERE url = 'https://s/p/a'",
+                         (time.time() - 30 * 3600, time.time() - 20 * 3600, time.time() - 10))
+        await db.commit()
+        alertes.clear()
+    await retour_long()
+    config.ALERTER_REAPPARITION = False
+    rap = await main.cycle_watchlist({"Boutique": sc}, 23)
+    assert alertes == [] and rap.stores[0].reapparitions == 1 and rap.stores[0].restocks == 0
+    await retour_long()
+    config.ALERTER_REAPPARITION = True
+    await main.cycle_watchlist({"Boutique": sc}, 24)
+    assert [(a[1], a[2]) for a in alertes] == [("REAPPARITION", "https://s/p/a")], alertes
+    config.ALERTER_REAPPARITION = False
 
     # --- Retour en RUPTURE : jamais d'alerte ---
     await db.execute("UPDATE produits SET introuvables = 6, introuvable_depuis = ?, "
@@ -349,7 +360,7 @@ async def _moteur():
     await db.commit()
     alertes.clear()
     sc.lot_a_fournir = {u: ok(False) for u in sc.lot_a_fournir}
-    await main.cycle_watchlist({"Boutique": sc}, 24)
+    await main.cycle_watchlist({"Boutique": sc}, 25)
     assert alertes == []
 
     # --- Historique de prix sans doublons ---

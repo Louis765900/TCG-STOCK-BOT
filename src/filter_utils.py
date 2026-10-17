@@ -189,6 +189,11 @@ _SIGNAUX_FAIBLES_RAW = [
 _ETAT_DEGRADE_RE = re.compile(
     r"\b(?:endommag\w*|abim\w*|occasion|seconde main|damaged|reconditionn\w*|defectueu\w*)\b")
 
+# Code de carte entre parentheses SANS denominateur, ex : "(DRI 007)", "(MEP 009)" = code
+# d'extension a 3-4 lettres + espace + numero a 3 chiffres. Ne touche pas les codes de set des
+# produits scelles ("(ME05)", "(EV06.5)", "(ETB)"), qui n'ont ni espace ni 3 chiffres.
+_CODE_CARTE_PAREN_RE = re.compile(r"\(\s*[a-z]{3,4}\s\d{3}\s*\)")
+
 # Numero de CARTE a l'unite, ex : "(BLK 105/086)", "152/217", "010/084". Un produit scelle
 # (display, ETB, coffret...) n'affiche jamais un numero de carte : c'est une carte seule.
 _NUMERO_CARTE_RE = re.compile(r"\b(?:[a-z]{1,3})?\d{2,3}\s?/\s?(?:[a-z]{1,3})?\d{2,3}\b")
@@ -247,7 +252,7 @@ def est_tcg_valide_local(titre: str, marque: str = "") -> bool:
         return False
 
     # 0. Carte a l'unite (numero de carte present) : pas du scelle, rejet immediat.
-    if _NUMERO_CARTE_RE.search(t):
+    if _NUMERO_CARTE_RE.search(t) or _CODE_CARTE_PAREN_RE.search(t):
         logger.debug("Rejete (carte a l'unite): %s", titre)
         return False
 
