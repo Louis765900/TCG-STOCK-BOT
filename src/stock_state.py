@@ -92,3 +92,28 @@ def calculer_pause(ecoule: float, mini: int, maxi: int, plancher: float = 5.0,
     """
     cible = mini + (maxi - mini) * alea
     return max(float(plancher), round(cible - ecoule, 2))
+
+
+class ConfirmationPrix:
+    """Exige N lectures consecutives du MEME nouveau prix avant d'agir (alerte baisse).
+
+    Un prix lu de travers (variante differente, page partielle) ne doit pas declencher une
+    fausse "baisse de prix". Etat en memoire ; un autre prix, ou le retour a l'ancien,
+    remet le compteur a zero.
+    """
+
+    def __init__(self, seuil: int = 2):
+        self.seuil = max(1, int(seuil))
+        self._vus: dict[str, tuple[str, int]] = {}
+
+    def confirme(self, cle: str, prix: str) -> bool:
+        precedent, n = self._vus.get(cle, (None, 0))
+        n = n + 1 if precedent == prix else 1
+        if n >= self.seuil:
+            self._vus.pop(cle, None)
+            return True
+        self._vus[cle] = (prix, n)
+        return False
+
+    def oublier(self, cle: str) -> None:
+        self._vus.pop(cle, None)

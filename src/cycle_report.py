@@ -13,6 +13,7 @@ class StoreReport:
     restocks: int = 0
     ruptures: int = 0
     duree_s: float = 0.0
+    lus_en_lot: int = 0   # produits traites par lecture groupee (sans requete individuelle)
 
     def __post_init__(self):
         self._debut = time.time()

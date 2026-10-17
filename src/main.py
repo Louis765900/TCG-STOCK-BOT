@@ -8,7 +8,8 @@ import database
 import bot_state
 from filter_utils import est_tcg_valide, est_tcg_valide_local
 from discord_webhook import envoyer_alerte, envoyer_message
-from stock_state import evaluer_transition, RESTOCK, RUPTURE, ConfirmationRupture, calculer_pause
+from stock_state import (evaluer_transition, RESTOCK, RUPTURE, ConfirmationRupture,
+                         ConfirmationPrix, calculer_pause)
 from store_health import StoreHealth
 from cycle_report import CycleReport, StoreReport
 from product_format import STORE_COLORS, parse_price, est_revendeur
@@ -27,6 +28,9 @@ _sante = StoreHealth(seuil=config.STORE_PAUSE_THRESHOLD, pause_s=config.STORE_PA
 
 # Confirmation des ruptures (anti faux restock) : cf. stock_state.ConfirmationRupture.
 _confirmation = ConfirmationRupture(config.RUPTURE_CONFIRMATIONS)
+
+# Confirmation des baisses de prix (anti fausse "DEAL") : cf. stock_state.ConfirmationPrix.
+_confirmation_prix = ConfirmationPrix(config.PRIX_CONFIRMATIONS)
 
 # Compteur d'alertes RÉELLEMENT envoyées sur Discord (≠ nombre de produits
 # découverts). Incrémenté seulement quand une alerte part vraiment.
@@ -213,6 +217,12 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
                         enseigne, _sante.minutes_restantes(enseigne))
             return
 
+        # Produits disparus (confirmes introuvables) : relus seulement a l'echeance.
+        maintenant = time.time()
+        items = [i for i in items if (i.get("prochaine_verif") or 0) <= maintenant]
+        if not items:
+            return
+
         # Concurrence PAR enseigne : on reste poli avec chaque site tout en
         # interrogeant toutes les enseignes en meme temps.
         sem = asyncio.Semaphore(
@@ -221,7 +231,27 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
         store.produits_trouves = len(items)
         etat = {"blocages": 0, "stop": False}
 
+        # Lecture GROUPEE (catalogue / liste) : une poignee de requetes pour toute la boutique.
+        # Les produits que le lot ne tranche pas ("a_verifier" ou absents) sont relus un par
+        # un : on ne devine jamais un stock.
+        lot: dict = {}
+        if config.WATCHLIST_LOT and hasattr(scraper, "scraper_lot"):
+            try:
+                lot = await scraper.scraper_lot([i["url"] for i in items]) or {}
+            except Exception as e:
+                logger.error("[%s] Lecture groupée en échec (%s) : lecture individuelle.",
+                             enseigne, e)
+                lot = {}
+        store.lus_en_lot = sum(1 for i in items
+                               if lot.get(i["url"], {}).get("status", "a_verifier") != "a_verifier")
+        if lot:
+            logger.info("[%s] Lecture groupée : %d/%d produits sans requête individuelle.",
+                        enseigne, store.lus_en_lot, len(items))
+
         async def verifier(item):
+            groupe = lot.get(item["url"])
+            if groupe is not None and groupe.get("status") != "a_verifier":
+                return item, groupe
             async with sem:
                 if etat["stop"]:
                     return item, {"status": "skipped"}
@@ -245,11 +275,18 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
 
         resultats = await asyncio.gather(*(verifier(i) for i in items))
 
-        ok, erreurs, inconnus = 0, 0, 0
+        ok, erreurs, inconnus, absents = 0, 0, 0, 0
         for item, res in resultats:
             statut = res.get("status")
             if statut != "ok":
-                if statut in ("blocked", "timeout"):
+                if statut == "not_found":
+                    absents += 1
+                    try:
+                        await _constat_introuvable(enseigne, item, store)
+                    except Exception as e:
+                        logger.error("[%s] Erreur constat disparition %s: %s",
+                                     enseigne, item["url"], e)
+                elif statut in ("blocked", "timeout"):
                     erreurs += 1
                 elif statut == "inconnu":
                     # Fiche lue mais stock indeterminable : on ne touche PAS a l'etat
@@ -259,13 +296,15 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
                 continue
             ok += 1
             try:
+                if item.get("introuvables") or item.get("prochaine_verif"):
+                    await database.reinitialiser_introuvable(item["url"])
                 await _traiter_resultat_watchlist(enseigne, item, res, store)
             except Exception as e:
                 logger.error("[%s] Erreur traitement %s: %s", enseigne, item["url"], e)
 
         if etat["stop"] or (erreurs and erreurs >= len(items) // 2 and ok == 0):
             store.terminer("blocked")
-        elif erreurs + inconnus > ok:
+        elif erreurs + inconnus + absents > ok:
             store.terminer("parser_error")
         else:
             store.terminer("healthy")
@@ -279,6 +318,24 @@ async def cycle_watchlist(scrapers_map: dict, cycle_num: int) -> CycleReport:
     await asyncio.gather(*(une_enseigne(e, it) for e, it in par_enseigne.items()))
     rapport.terminer()
     return rapport
+
+
+async def _constat_introuvable(enseigne: str, item: dict, store: StoreReport):
+    """Un produit n'est PAS declare disparu sur un seul 404 (page en maintenance, produit
+    depublie quelques minutes) : il faut DISPARU_MIN_ECHECS constats consecutifs ET une
+    absence continue d'au moins DISPARU_APRES_HEURES. Il est alors marque indisponible
+    (sans alerte) et n'est plus relu que toutes les DISPARU_RECHECK_HEURES ; s'il revient en
+    stock, c'est un vrai restock."""
+    url = item["url"]
+    n, depuis = await database.marquer_introuvable(url)
+    if n >= config.DISPARU_MIN_ECHECS and time.time() - depuis >= config.DISPARU_APRES_HEURES * 3600:
+        deja = bool(item.get("prochaine_verif"))
+        await database.marquer_disparu(url, time.time() + config.DISPARU_RECHECK_HEURES * 3600)
+        if not deja:
+            logger.warning("Produit disparu [%s] après %d constats / %.0f h: %s",
+                           enseigne, n, (time.time() - depuis) / 3600, item["titre"])
+        if item.get("en_stock"):
+            store.ruptures += 1
 
 
 async def _traiter_resultat_watchlist(enseigne: str, item: dict, res: dict, store: StoreReport):
@@ -351,9 +408,20 @@ async def _traiter_resultat_watchlist(enseigne: str, item: dict, res: dict, stor
             if ancien_prix and nouveau_prix and nouveau_prix < ancien_prix:
                 baisse = float((ancien_prix - nouveau_prix) / ancien_prix * 100)
                 if baisse >= config.DEAL_DROP_PERCENT:
+                    if not _confirmation_prix.confirme(url, str(nouveau_prix)):
+                        # Premiere lecture de ce prix : on garde l'ancien prix en base
+                        # (reference de comparaison) et on attend la confirmation.
+                        logger.info("Baisse de prix à confirmer [%s]: %s (-%.0f%%)",
+                                    enseigne, item["titre"], baisse)
+                        await database.mettre_a_jour_stock(url, en_stock_actuel, None)
+                        return
                     logger.info("DEAL [%s]: %s (-%.0f%%)", enseigne, item["titre"], baisse)
                     prod_deal = dict(prod_alerte, old_price=str(ancien_prix))
                     await _alerter(prod_deal, enseigne, "DEAL")
+                else:
+                    _confirmation_prix.oublier(url)
+            else:
+                _confirmation_prix.oublier(url)
         await database.mettre_a_jour_stock(url, en_stock_actuel, prix_actuel)
 
 

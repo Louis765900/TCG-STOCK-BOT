@@ -49,6 +49,7 @@ Points faibles relevés :
 - ✅ **C7 — Audit scraper par scraper** : `tools/audit_scrapers.py` + `docs/AUDIT_SCRAPERS_V2.md`. Fonctionnels (testés en réel) : Auchan, LudiJeux, RelicTCG, CoinBarons. Défaillants : Leclerc (403), Cultura, King Jouet, Smyths, La Grande Récré.
   - ⬜ C7b : rétablir Leclerc (à vérifier depuis la machine de production), nouvelles sources pour Cultura / La Grande Récré (avec C8).
 - 🔄 **C8 — Nouvelles enseignes FR** — partie 1 ✅ : Carrefour (rayons + fiches JSON-LD, direct vs marketplace, stock/rupture/inconnu) et Dracaugames (Shopify, catalogue complet). Fnac bloquée (DataDome), Micromania (Imperva), Maxi Toys (DataDome) écartées. Rapport : `docs/RAPPORT_C8.md`.
+  - ✅ C8B — performances Shopify/Woo : lecture groupée (440 → 76 requêtes, 25,1 → 12,0 s par cycle sur 5 enseignes), variantes, produits disparus, confirmation de baisse de prix. Rapport : `docs/RAPPORT_C8B.md`.
   - ⬜ C8 partie 2 : boutiques Shopify/Woo FR supplémentaires, Joué Club / La Grande Récré (API à analyser).
 
 ## P2 — Magasins & géographie
@@ -118,3 +119,11 @@ Points faibles relevés :
 - Dracaugames : mode « catalogue complet » Shopify (`/products.json`) qui suit aussi les ruptures ; cartes à l'unité exclues (filtre global : numéro de carte).
 - Moteur : amorçage silencieux par enseigne (nouvelle enseigne ≠ inondation Discord), statut `inconnu` compté en `parser_error`, concurrence par scraper, exception de fiche isolée.
 - Défauts `ENABLED_STORES` étendus (installations existantes inchangées). 17/17 tests ; bout en bout réel sans alerte.
+
+### C8B — Optimisation des monitors Shopify / WooCommerce
+- Lecture groupée de la watchlist (`scraper_lot`) : collections Shopify scellé (auto-détectées), listes + lots de slugs Woo ; repli individuel pour tout produit non tranché. Parité 407/407 avec la lecture par fiche.
+- Mesures : Dracaugames 127→15 req (9,8→3,5 s), CoinBarons 53→3, LudiJeux 57→14, RelicTCG 50→12 ; moteur 5 enseignes : 440→76 requêtes, 25,1→12,0 s, 0 alerte.
+- Découverte Dracaugames complète (250 produits scellés au lieu de 127) ; `products_count` Shopify inexact (non utilisé pour dimensionner).
+- Variantes d'état/langue ignorées pour le stock (faux restock « Endommagé » évité) ; Woo variable = inconnu.
+- Produits disparus (seuils combinés nb/durée, relecture espacée), baisse de prix confirmée sur 2 lectures, `N/A` n'écrase plus le dernier prix, historique de prix sans doublons.
+- Nouveaux réglages : `WATCHLIST_LOT`, `SHOPIFY_COLLECTIONS`, `SHOPIFY_VARIANTES_EXCLUES`, `PRIX_CONFIRMATIONS`, `DISPARU_*`. Outil : `tools/bench_monitors.py`. 18/18 tests.

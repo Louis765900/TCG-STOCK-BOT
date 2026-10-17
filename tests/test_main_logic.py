@@ -66,7 +66,29 @@ async def _scenario():
     await database.ajouter_produit("u3", "Coffret", "Auchan", True, prix="40")
     await main._traiter_resultat_watchlist("Auchan", _item("u3", "40", True),
                                            _res("ok", True, "29.99"), Store())
-    assert "DEAL" in alertes
+    assert "DEAL" not in alertes                      # 1re lecture : a confirmer
+    assert (await database.recuperer_produit("u3"))["prix"] == "40"   # reference conservee
+    await main._traiter_resultat_watchlist("Auchan", _item("u3", "40", True),
+                                           _res("ok", True, "29.99"), Store())
+    assert "DEAL" in alertes                          # 2e lecture identique : confirmee
+    assert (await database.recuperer_produit("u3"))["prix"] == "29.99"
+
+    # --- Glitch de prix: la baisse n'est pas confirmee puis le prix revient => aucun deal ---
+    alertes.clear()
+    await database.ajouter_produit("u3b", "Coffret", "Auchan", True, prix="40")
+    await main._traiter_resultat_watchlist("Auchan", _item("u3b", "40", True),
+                                           _res("ok", True, "5.00"), Store())
+    await main._traiter_resultat_watchlist("Auchan", _item("u3b", "40", True),
+                                           _res("ok", True, "40"), Store())
+    await main._traiter_resultat_watchlist("Auchan", _item("u3b", "40", True),
+                                           _res("ok", True, "5.00"), Store())
+    assert alertes == []
+
+    # --- Prix inconnu (N/A) n'ecrase pas le dernier prix connu ---
+    await main._traiter_resultat_watchlist("Auchan", _item("u3b", "40", True),
+                                           _res("ok", True, "N/A"), Store())
+    assert (await database.recuperer_produit("u3b"))["prix"] == "40"
+    alertes.clear()
 
     # --- Pause : aucune alerte ne part ---
     alertes.clear()

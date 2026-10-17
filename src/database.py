@@ -65,7 +65,10 @@ async def initialiser_db():
             derniere_alerte REAL DEFAULT 0,
             dernier_vu REAL NOT NULL,
             date_decouverte REAL NOT NULL,
-            manuel INTEGER DEFAULT 0
+            manuel INTEGER DEFAULT 0,
+            introuvables INTEGER DEFAULT 0,
+            introuvable_depuis REAL DEFAULT 0,
+            prochaine_verif REAL DEFAULT 0
         )
     """)
     await db.execute("""
@@ -119,6 +122,12 @@ async def _migrer_colonnes(db):
         # 1 = ajoute a la main (/watch, /add) : jamais purge par le filtre automatique.
         await db.execute("ALTER TABLE produits ADD COLUMN manuel INTEGER DEFAULT 0")
         logger.info("Migration: colonne 'manuel' ajoutée.")
+    for col, ddl in (("introuvables", "INTEGER DEFAULT 0"),
+                     ("introuvable_depuis", "REAL DEFAULT 0"),
+                     ("prochaine_verif", "REAL DEFAULT 0")):
+        if col not in colonnes:
+            await db.execute(f"ALTER TABLE produits ADD COLUMN {col} {ddl}")
+            logger.info("Migration: colonne '%s' ajoutée.", col)
 
 
 async def recuperer_produit(url: str):
@@ -157,7 +166,9 @@ async def ajouter_produit(url: str, titre: str, enseigne: str, en_stock: bool,
 async def mettre_a_jour_stock(url: str, en_stock: bool, prix: str | None = None):
     now = time.time()
     db = await _conn()
-    if prix is not None:
+    # "N/A" = prix inconnu a cet instant : on garde le dernier prix CONNU (sinon la
+    # detection de baisse perd sa reference et un prix revenu serait pris pour un deal).
+    if prix is not None and str(prix).strip().upper() != "N/A":
         await db.execute(
             "UPDATE produits SET en_stock = ?, prix = ?, dernier_vu = ? WHERE url = ?",
             (int(en_stock), prix, now, url)
@@ -186,6 +197,38 @@ async def retirer_produit(url: str) -> bool:
     return True
 
 
+async def marquer_introuvable(url: str, maintenant: float | None = None) -> tuple[int, float]:
+    """Enregistre un constat "introuvable" ; retourne (constats consecutifs, depuis quand)."""
+    now = maintenant if maintenant is not None else time.time()
+    db = await _conn()
+    await db.execute(
+        "UPDATE produits SET introuvables = COALESCE(introuvables, 0) + 1, "
+        "introuvable_depuis = CASE WHEN COALESCE(introuvable_depuis, 0) = 0 THEN ? "
+        "ELSE introuvable_depuis END WHERE url = ?", (now, url))
+    await db.commit()
+    async with db.execute("SELECT introuvables, introuvable_depuis FROM produits WHERE url = ?",
+                          (url,)) as cur:
+        row = await cur.fetchone()
+    return (row["introuvables"], row["introuvable_depuis"]) if row else (0, 0.0)
+
+
+async def marquer_disparu(url: str, prochaine_verif: float):
+    """Produit confirme disparu : marque indisponible et espace les relectures."""
+    db = await _conn()
+    await db.execute("UPDATE produits SET en_stock = 0, prochaine_verif = ? WHERE url = ?",
+                     (prochaine_verif, url))
+    await db.commit()
+
+
+async def reinitialiser_introuvable(url: str):
+    """Le produit a ete relu normalement : efface les constats d'absence."""
+    db = await _conn()
+    await db.execute("UPDATE produits SET introuvables = 0, introuvable_depuis = 0, "
+                     "prochaine_verif = 0 WHERE url = ? AND (COALESCE(introuvables, 0) > 0 "
+                     "OR COALESCE(prochaine_verif, 0) > 0)", (url,))
+    await db.commit()
+
+
 async def marquer_vu(url: str):
     db = await _conn()
     await db.execute("UPDATE produits SET dernier_vu = ? WHERE url = ?", (time.time(), url))
@@ -208,9 +251,21 @@ async def enregistrer_cycle(timestamp: float, cycle_num: int, enseigne: str, sta
 async def enregistrer_prix(url: str, prix_value: float, en_stock: bool):
     """Ajoute un point d'historique de prix (seulement si le prix est numérique)."""
     db = await _conn()
+    now = time.time()
+    # Pas de doublon : un point n'est ajoute que si le prix ou le stock a change, ou si le
+    # dernier point date de plus de 6 h (evite une ligne par produit et par cycle).
+    async with db.execute(
+        "SELECT prix_value, en_stock, timestamp FROM price_history WHERE url = ? "
+        "ORDER BY id DESC LIMIT 1", (url,)
+    ) as cur:
+        dernier = await cur.fetchone()
+    if (dernier is not None and abs(dernier["prix_value"] - prix_value) < 1e-9
+            and bool(dernier["en_stock"]) == bool(en_stock)
+            and now - dernier["timestamp"] < 6 * 3600):
+        return
     await db.execute(
         "INSERT INTO price_history (url, prix_value, en_stock, timestamp) VALUES (?, ?, ?, ?)",
-        (url, prix_value, int(en_stock), time.time())
+        (url, prix_value, int(en_stock), now)
     )
     await db.commit()
 

@@ -260,10 +260,38 @@ SHOPIFY_SHOPS = _parse_shops(os.getenv("SHOPIFY_SHOPS", ""), _DEFAULT_SHOPIFY)
 # Par defaut NON : seul le stock vendu/expedie par Carrefour declenche une alerte.
 CARREFOUR_INCLURE_MARKETPLACE = os.getenv("CARREFOUR_INCLURE_MARKETPLACE", "false").lower() in {"1", "true", "yes", "on"}
 
+# Lecture GROUPEE de la watchlist : les scrapers qui savent lire plusieurs produits d'un
+# coup (catalogue Shopify, liste WooCommerce) evitent une requete par fiche. Les produits
+# que le lot ne peut pas trancher sont verifies individuellement (jamais devines).
+WATCHLIST_LOT = os.getenv("WATCHLIST_LOT", "true").lower() in {"1", "true", "yes", "on"}
+
+# Baisse de prix : lectures identiques consecutives avant d'alerter "DEAL" (anti-glitch).
+PRIX_CONFIRMATIONS = int(os.getenv("PRIX_CONFIRMATIONS", "2"))
+
+# Produit introuvable (404 / absent de la boutique) : apres DISPARU_MIN_ECHECS constats
+# consecutifs ET DISPARU_APRES_HEURES d'absence continue, il est considere "disparu"
+# (marque indisponible, plus relu qu'une fois toutes les DISPARU_RECHECK_HEURES).
+DISPARU_MIN_ECHECS = int(os.getenv("DISPARU_MIN_ECHECS", "5"))
+DISPARU_APRES_HEURES = float(os.getenv("DISPARU_APRES_HEURES", "6"))
+DISPARU_RECHECK_HEURES = float(os.getenv("DISPARU_RECHECK_HEURES", "6"))
+
 # Boutiques Shopify decouvertes par catalogue complet (/products.json : ruptures incluses)
 # plutot que par recherche predictive (qui masque les produits epuises).
 SHOPIFY_CATALOGUE_COMPLET = {s.strip() for s in os.getenv(
     "SHOPIFY_CATALOGUE_COMPLET", "Dracaugames").split(",") if s.strip()}
+
+# Collections Shopify a lire, par boutique (sinon detection automatique du scelle Pokemon /
+# One Piece). Format : SHOPIFY_COLLECTIONS="Dracaugames=coffrets-pokemon|decks-pokemon,Autre=h1".
+SHOPIFY_COLLECTIONS = {nom: [h for h in val.split("|") if h.strip()]
+                       for nom, val in _parse_shops(os.getenv("SHOPIFY_COLLECTIONS", ""), {}).items()}
+
+# Variantes Shopify IGNOREES pour le stock (etat ou langue non voulus) : un produit dont seule
+# une de ces variantes est disponible reste en rupture. Mots separes par des virgules.
+SHOPIFY_VARIANTES_EXCLUES = [m.strip() for m in os.getenv(
+    "SHOPIFY_VARIANTES_EXCLUES",
+    "endommag,abim,abîm,occasion,used,damaged,seconde main,reconditionn,open box,defectueu,"
+    "défectueu,anglais,english,japonais,japanese,coreen,coréen,korean,allemand,german,"
+    "italien,italian,espagnol,spanish").split(",") if m.strip()]
 
 # Routage Discord par enseigne (optionnel) : une enseigne peut avoir son propre
 # webhook (mode webhook) ou son propre salon (mode bot). Les enseignes non listees
